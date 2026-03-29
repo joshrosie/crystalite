@@ -3,7 +3,7 @@
 </p>
 
 ---
->[!warning] Note
+>[!WARNING]
 >This is a pre-release of the `crystalite` codebase and is not necessarily representative of the final working product.
 
 
