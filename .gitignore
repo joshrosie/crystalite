@@ -1,0 +1,14 @@
+/data/
+.venv
+__pycache__/
+mp20_cifs/
+mp_02072023/*
+/wandb/
+/outputs/
+logs/
+flowmm/
+phonon/
+jobs/
+job_outputs/
+baselines/
+.DS_Store
