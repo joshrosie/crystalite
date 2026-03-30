@@ -551,7 +551,7 @@ class ChemDescriptorRawEncoding:
 
     def __init__(self, vz: int) -> None:
         self.vz = int(vz)
-        self.name = "chem_raw_v2"
+        self.name = "subatomic_tokenizer_raw"
         self.max_z, descriptor_table, self.group_slices = _build_chem_v2_descriptor_table(vz=vz)
         self.descriptor_dim = int(descriptor_table.shape[-1])
         self.type_dim = self.descriptor_dim
@@ -605,7 +605,7 @@ class ChemPCAEncodingV2:
         self.requested_pca_dim = int(pca_dim)
         if self.requested_pca_dim <= 0:
             raise ValueError(f"pca_dim must be > 0, got {self.requested_pca_dim}.")
-        self.name = f"chem_pca_v2_{self.requested_pca_dim}"
+        self.name = f"subatomic_tokenizer_pca_{self.requested_pca_dim}"
 
         self.max_z, descriptor_table, self.group_slices = _build_chem_v2_descriptor_table(vz=vz)
         self.descriptor_dim = int(descriptor_table.shape[-1])
@@ -677,14 +677,17 @@ def build_type_encoding(mode: str, vz: int) -> TypeEncoding:
     mode_norm = mode.strip().lower()
     if mode_norm == "atomic_number":
         return AtomicNumberEncoding(vz=vz)
-    if mode_norm in {"periodic_table_2d", "table"}:
-        return PeriodicTable2DEncoding(vz=vz)
-    if mode_norm in {"electron_config", "ec"}:
-        return ElectronConfigEncoding(vz=vz)
-    if mode_norm == "chem_raw_v2":
+    if mode_norm in {"subatomic_tokenizer_raw", "chem_raw_v2"}:
         return ChemDescriptorRawEncoding(vz=vz)
-    if mode_norm == "chem_pca_v2":
+    if mode_norm in {"subatomic_tokenizer_pca", "chem_pca_v2"}:
         return ChemPCAEncodingV2(vz=vz, pca_dim=24)
+    if mode_norm.startswith("subatomic_tokenizer_pca_"):
+        suffix = mode_norm.rsplit("_", 1)[-1]
+        try:
+            pca_dim = int(suffix)
+        except ValueError as exc:
+            raise ValueError(f"Invalid subatomic_tokenizer_pca mode '{mode}'.") from exc
+        return ChemPCAEncodingV2(vz=vz, pca_dim=pca_dim)
     if mode_norm.startswith("chem_pca_v2_"):
         suffix = mode_norm.rsplit("_", 1)[-1]
         try:
@@ -694,6 +697,6 @@ def build_type_encoding(mode: str, vz: int) -> TypeEncoding:
         return ChemPCAEncodingV2(vz=vz, pca_dim=pca_dim)
     raise ValueError(
         "Unknown type encoding "
-        f"'{mode}'. Expected one of: atomic_number, periodic_table_2d, "
-        "electron_config, chem_raw_v2, chem_pca_v2."
+        f"'{mode}'. Expected one of: atomic_number, subatomic_tokenizer_raw, "
+        "subatomic_tokenizer_pca_8, subatomic_tokenizer_pca_16, subatomic_tokenizer_pca_24."
     )

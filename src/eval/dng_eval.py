@@ -10,7 +10,6 @@ import numpy as np
 
 from src.data.mp20_tokens import tokens_to_eval_dict, tokens_to_structure as _tokens_to_structure
 from src.eval.crystal import array_dict_to_crystal
-from src.eval.diagnostics import _compute_sample_diagnostics
 from src.eval.stability import _compute_thermo_metrics
 from src.eval.uniqueness_novelty import compute_uniqueness_novelty
 from src.eval.wasserstein import _compute_wasserstein_metrics
@@ -148,7 +147,6 @@ def compute_evaluator_metrics(
     limit: int,
     ref_structs: list[Any] | None,
     sample_seed: int,
-    include_diagnostics: bool = True,
     include_wasserstein: bool = True,
     wasserstein_max_samples: int | None = None,
 ) -> EvaluatorMetricsResult:
@@ -166,9 +164,6 @@ def compute_evaluator_metrics(
     result.valid_rate = sum(c.valid for c in crystals) / eval_count
     result.comp_valid_rate = sum(c.comp_valid for c in crystals) / eval_count
     result.struct_valid_rate = sum(c.struct_valid for c in crystals) / eval_count
-
-    if include_diagnostics:
-        result.diag_metrics = _compute_sample_diagnostics(result.pred_crys_list)
 
     if include_wasserstein and ref_structs:
         max_samples = (

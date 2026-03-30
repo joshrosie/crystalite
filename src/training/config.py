@@ -87,20 +87,15 @@ def build_parser() -> argparse.ArgumentParser:
         default="atomic_number",
         choices=[
             "atomic_number",
-            "periodic_table_2d",
-            "table",
-            "electron_config",
-            "ec",
-            "chem_raw_v2",
-            "chem_pca_v2",
-            "chem_pca_v2_8",
-            "chem_pca_v2_16",
-            "chem_pca_v2_24",
+            "subatomic_tokenizer_raw",
+            "subatomic_tokenizer_pca",
+            "subatomic_tokenizer_pca_8",
+            "subatomic_tokenizer_pca_16",
+            "subatomic_tokenizer_pca_24",
         ],
         help=(
             "Atom-type encoding mode for EDM: atomic-number channels, "
-            "CrystalFlow-style periodic-table 2D channels, electron-configuration "
-            "channels, or the v2 chemistry descriptor family (raw / PCA-compressed)."
+            "or the subatomic tokenizer family (raw / PCA-compressed)."
         ),
     )
     parser.add_argument(
@@ -258,9 +253,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no_wandb", action="store_true")
     parser.add_argument("--output_dir", type=str, default="outputs/train_crystalite")
     # Sampling
-    parser.add_argument("--sample_every", type=int, default=1000)
+    parser.add_argument(
+        "--sample_frequency",
+        type=int,
+        default=50000,
+        help="Step interval for sampling/metrics (0 to disable).",
+    )
     parser.add_argument("--sample_vis_count", type=int, default=10)
-    parser.add_argument("--sample_metrics_count", type=int, default=2048)
+    parser.add_argument(
+        "--sample_count",
+        type=int,
+        default=10000,
+        help="Number of samples used for metrics/eval.",
+    )
     parser.add_argument("--sample_num_steps", type=int, default=50)
     parser.add_argument("--sample_seed", type=int, default=123)
     parser.add_argument(
@@ -292,18 +297,6 @@ def build_parser() -> argparse.ArgumentParser:
             "Max structures used for the novelty reference train split "
             "(0 or negative = full reference train set)."
         ),
-    )
-    parser.add_argument(
-        "--precise_every",
-        type=int,
-        default=50000,
-        help="Step interval for precise sampling/metrics (0 to disable).",
-    )
-    parser.add_argument(
-        "--precise_metrics_count",
-        type=int,
-        default=10000,
-        help="Number of samples used for precise metrics/eval (controls precise sampling batch size).",
     )
     parser.add_argument(
         "--thermo_stability_check",
@@ -394,14 +387,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--sun_k",
         type=int,
-        default=0,
-        help="Number of unique+novel structures to relax for SUN/MSUN metrics (0 disables).",
-    )
-    parser.add_argument(
-        "--precise_sun_k",
-        type=int,
         default=2048,
-        help="Number of UN structures to relax for SUN/MSUN during precise sampling (0 disables for precise).",
+        help="Number of UN structures to relax for SUN/MSUN metrics (0 disables).",
     )
     parser.add_argument(
         "--csp_precise_topk_list",
@@ -540,12 +527,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     """Normalise aliases, resolve derived fields, and call parser.error for invalid combos."""
-    if args.type_encoding == "table":
-        args.type_encoding = "periodic_table_2d"
-    elif args.type_encoding == "ec":
-        args.type_encoding = "electron_config"
-    elif args.type_encoding == "chem_pca_v2":
-        args.type_encoding = "chem_pca_v2_24"
+    if args.type_encoding == "subatomic_tokenizer_pca":
+        args.type_encoding = "subatomic_tokenizer_pca_24"
     args.nequip_relax_mode = str(args.nequip_relax_mode).strip().lower()
     try:
         args.csp_precise_topk_list = _normalize_topk_list(args.csp_precise_topk_list)

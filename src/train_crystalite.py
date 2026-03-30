@@ -32,7 +32,6 @@ from src.data.mp20_tokens import (
     VZ,
 )
 
-from src.eval.diagnostics import _compute_sample_diagnostics
 from src.eval.stability import _compute_thermo_metrics
 from src.eval.wasserstein import _compute_wasserstein_metrics
 from src.data.type_encoding import build_type_encoding
@@ -300,7 +299,7 @@ def main() -> None:
 
     ase_view = None
 
-    enable_dng_metrics = args.sample_metrics_count > 0 or args.precise_metrics_count > 0
+    enable_dng_metrics = args.sample_count > 0
     novelty_ref_structs = None
     ref_stats = None
     ref_structs = []
@@ -339,7 +338,7 @@ def main() -> None:
             novelty_ref_structs = dataset_to_structures(metrics_ref_ds)
 
         if (
-            args.sample_every > 0
+            args.sample_frequency > 0
             and metrics_ref_ds is not None
             and len(metrics_ref_ds) > 0
         ):
@@ -677,9 +676,8 @@ def main() -> None:
 
             model.train()
 
-        do_sample = args.sample_every > 0 and (step % args.sample_every == 0)
-        do_precise = args.precise_every > 0 and (step % args.precise_every == 0)
-        if do_sample or do_precise:
+        do_sample = args.sample_frequency > 0 and (step % args.sample_frequency == 0)
+        if do_sample:
             base_seed = args.sample_seed + step
             was_training = model.training
 
@@ -717,12 +715,10 @@ def main() -> None:
 
             runs, ema_missing = _build_sampling_runs(
                 do_sample=do_sample,
-                do_precise=do_precise,
                 sample_mode=args.sample_mode,
                 ema_use_for_sampling=args.ema_use_for_sampling,
                 ema_available=(ema is not None),
-                sample_metrics_count=args.sample_metrics_count,
-                precise_metrics_count=args.precise_metrics_count,
+                sample_count=args.sample_count,
             )
 
             if ema_missing:

@@ -13,10 +13,7 @@ from src.crystalite import mod1
 from src.crystalite.sampler import clamp_lattice_latent, edm_sampler
 from src.eval.crystal import Crystal
 from src.eval.csp_eval import RecEval, RecEvalBatch
-from src.eval.diagnostics import (
-    _add_diagnostic_section_metrics,
-    _log_element_histogram,
-)
+from src.eval.diagnostics import _log_element_histogram
 from src.eval.stability import _compute_thermo_metrics
 from src.eval.dng_eval import (
     build_reference_thermo_comparison_metrics,
@@ -94,12 +91,10 @@ def _safe_crystal_from_tokens(item: dict[str, Any], sample_idx: int) -> Crystal:
 
 def _build_sampling_runs(
     do_sample: bool,
-    do_precise: bool,
     sample_mode: str,
     ema_use_for_sampling: bool,
     ema_available: bool,
-    sample_metrics_count: int,
-    precise_metrics_count: int,
+    sample_count: int,
 ) -> tuple[list[tuple[str, bool, int]], bool]:
     """Build the list of (tag, use_ema, metrics_count) sampling runs.
 
@@ -112,18 +107,11 @@ def _build_sampling_runs(
     runs: list[tuple[str, bool, int]] = []
     if do_sample:
         if want_regular:
-            runs.append(("sample", False, sample_metrics_count))
+            runs.append(("sample", False, sample_count))
         if want_ema and ema_available:
-            runs.append(("sample_ema", True, sample_metrics_count))
+            runs.append(("sample_ema", True, sample_count))
         elif ema_missing and not want_regular:
-            runs.append(("sample", False, sample_metrics_count))
-    if do_precise:
-        if want_regular:
-            runs.append(("precise", False, precise_metrics_count))
-        if want_ema and ema_available:
-            runs.append(("precise_ema", True, precise_metrics_count))
-        elif ema_missing and not want_regular:
-            runs.append(("precise", False, precise_metrics_count))
+            runs.append(("sample", False, sample_count))
 
     return runs, ema_missing
 
@@ -222,7 +210,6 @@ def generate_sampling_batch(
     requested_samples = max(int(args.sample_vis_count), int(request.metrics_count))
     if (
         request.is_csp
-        and request.tag.startswith("precise")
         and args.csp_precise_topk_list
         and int(args.csp_precise_topk_samples) > 0
     ):
@@ -495,11 +482,6 @@ def evaluate_dng_sampling_batch(
             sample_items,
             total_count=n_samples,
         )
-        if not tag.startswith("precise"):
-            invalid_metrics = {
-                f"{tag}/{key}": val for key, val in stats_result.metrics.items()
-            }
-            log_metrics(invalid_metrics, step=step, enabled=ctx.wandb_enabled)
         plot_sample_vs_ref_stats(
             tag=tag,
             sample_stats=stats_result.sample_stats or {},
@@ -515,7 +497,6 @@ def evaluate_dng_sampling_batch(
         limit=metrics_count,
         ref_structs=ctx.ref_structs or [],
         sample_seed=args.sample_seed,
-        include_diagnostics=not tag.startswith("precise"),
         include_wasserstein=True,
         wasserstein_max_samples=max(int(metrics_count), 1),
     )
@@ -528,15 +509,6 @@ def evaluate_dng_sampling_batch(
                 evaluator_result.struct_valid_rate or 0.0
             ),
         }
-        if not tag.startswith("precise") and evaluator_result.diag_metrics:
-            for key, val in evaluator_result.diag_metrics.items():
-                log_payload[f"{tag}/{key}"] = val
-            _add_diagnostic_section_metrics(
-                log_payload,
-                tag=tag,
-                diag=evaluator_result.diag_metrics,
-            )
-
         dist_payload: dict[str, float] = {}
         if evaluator_result.dist_metrics:
             if "sample_dist/wdist_nary" in evaluator_result.dist_metrics:
@@ -547,27 +519,10 @@ def evaluate_dng_sampling_batch(
                 dist_payload[f"{tag}/wdist_density_mass"] = evaluator_result.dist_metrics[
                     "sample_dist/wdist_density_mass"
                 ]
-            if not tag.startswith("precise"):
-                dist_payload.update(
-                    {
-                        k: v
-                        for k, v in evaluator_result.dist_metrics.items()
-                        if k
-                        not in {
-                            "sample_dist/wdist_nary",
-                            "sample_dist/wdist_density_mass",
-                        }
-                    }
-                )
 
-        if tag.startswith("precise"):
-            log_metrics(
-                {**log_payload, **dist_payload}, step=step, enabled=ctx.wandb_enabled
-            )
-        else:
-            log_metrics(log_payload, step=step, enabled=ctx.wandb_enabled)
-            if dist_payload:
-                log_metrics(dist_payload, step=step, enabled=ctx.wandb_enabled)
+        log_metrics(
+            {**log_payload, **dist_payload}, step=step, enabled=ctx.wandb_enabled
+        )
 
     # Canonical novelty/uniqueness + SUN/MSUN.
     novelty_result = compute_novelty_metrics(
@@ -586,9 +541,7 @@ def evaluate_dng_sampling_batch(
         log_metrics(novelty_payload, step=step, enabled=ctx.wandb_enabled)
 
         if ctx.thermo_logger is not None and step >= args.no_thermo_before_steps:
-            sun_target = (
-                args.sun_k if not tag.startswith("precise") else args.precise_sun_k
-            )
+            sun_target = args.sun_k
             if sun_target > 0:
                 sun_result = compute_sun_metrics(
                     novelty_metrics,
@@ -618,10 +571,7 @@ def evaluate_dng_sampling_batch(
     if (
         ctx.thermo_logger is not None
         and step >= args.no_thermo_before_steps
-        and (
-            (not tag.startswith("precise") and args.sun_k <= 0)
-            or (tag.startswith("precise") and args.precise_sun_k <= 0)
-        )
+        and args.sun_k <= 0
     ):
         thermo_count = (
             args.thermo_stability_count
@@ -740,8 +690,7 @@ def evaluate_csp_sampling_batch(
 
     # Top-k evaluation: generate additional candidates per target
     if (
-        tag.startswith("precise")
-        and args.csp_precise_topk_list
+        args.csp_precise_topk_list
         and args.csp_precise_topk_samples > 0
     ):
         topk_list = _normalize_topk_list(args.csp_precise_topk_list)
