@@ -92,7 +92,7 @@ item = ds[0]
 
 Dataset presets are selected with `--dataset_name` and currently include `mp20`, `mpts_52`,  `alex_mp20`, and `custom`. `--nmax` is resolved from the dataset preset unless overridden explicitly.
 
-Raw dataset files for `mpts_52`, `alex_mp20`, and `mp20` are available from [HuggingFace](https://huggingface.co/datasets/jbungle/crystalite-datasets/tree/main).
+Raw dataset files for `mpts_52`, `alex_mp20`, and `mp20` are available from [HuggingFace](https://huggingface.co/datasets/joshrosie/crystalite-datasets/tree/main).
 
 The datasets can be downloaded directly using:
 ```python
