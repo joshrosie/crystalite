@@ -121,10 +121,8 @@ python src/train_crystalite.py \
   --data_root data/mp20 \
   --dataset_name mp20 \
   --output_dir outputs/dng_mp20 \
-  --sample_every 1000 \
-  --sample_metrics_count 2048 \
-  --precise_every 50000 \
-  --precise_metrics_count 10000 \
+  --sample_frequency 1000 \
+  --sample_count 2048 \
   --best_ckpt
 ```
 
@@ -144,9 +142,8 @@ python src/train_crystalite.py \
   --data_root data/mp20 \
   --dataset_name mp20 \
   --output_dir outputs/csp_mp20 \
-  --sample_every 1000 \
-  --sample_metrics_count 256 \
-  --precise_every 50000 \
+  --sample_frequency 1000 \
+  --sample_count 256 \
   --best_ckpt
 ```
 
@@ -165,15 +162,13 @@ When sampling is enabled during training, DNG can log:
 - validity metrics
 - Wasserstein distribution distances
 - novelty, unique+novel rate, and related DNG metrics
-- SUN/MSUN if thermo relaxation is enabled and `sun_k` or `precise_sun_k` is positive
+- SUN/MSUN if thermo relaxation is enabled and `sun_k` is positive
 - standalone thermo metrics and generated-vs-reference thermo comparisons
 
 These metrics are driven by the train-time sampling settings such as:
 
-- `--sample_every`
-- `--sample_metrics_count`
-- `--precise_every`
-- `--precise_metrics_count`
+- `--sample_frequency`
+- `--sample_count`
 - `--sample_mode`
 - `--sample_num_steps`
 
@@ -187,12 +182,12 @@ In CSP mode, train-time sampling logs reconstruction metrics rather than DNG nov
 
 ### DNG post-training checkpoint evaluation
 
-The first-class standalone checkpoint-eval entrypoint is `src/eval_subatomic_edm_ckpt.py`, which is currently DNG-oriented.
+The first-class standalone checkpoint-eval entrypoint is `src/eval_crystalite_ckpt.py`, which is currently DNG-oriented.
 
 Canonical DNG checkpoint eval:
 
 ```bash
-python src/eval_subatomic_edm_ckpt.py \
+python src/eval_crystalite_ckpt.py \
   --train_output_dir outputs/dng_mp20 \
   --checkpoint_preference best \
   --num_samples 10000 \
@@ -209,12 +204,12 @@ This path can compute:
 
 ### Offline checkpoint sampling
 
-If you only want to sample structures from a checkpoint without running the evaluator stack, use `src/sample_subatomic_edm_ckpt.py`.
+If you only want to sample structures from a checkpoint without running the evaluator stack, use `src/sample_crystalite_ckpt.py`.
 
 Minimal offline sampling:
 
 ```bash
-python src/sample_subatomic_edm_ckpt.py \
+python src/sample_crystalite_ckpt.py \
   --checkpoint outputs/dng_mp20/checkpoints/best.pt \
   --num_samples 256 \
   --output_dir outputs/dng_mp20/offline_demo
@@ -230,7 +225,7 @@ Behavior:
 If the training dataset is available locally, the script can also reuse it for empirical atom-count sampling and train-split element masking:
 
 ```bash
-python src/sample_subatomic_edm_ckpt.py \
+python src/sample_crystalite_ckpt.py \
   --checkpoint outputs/dng_mp20/checkpoints/best.pt \
   --num_samples 256 \
   --atom_count_strategy empirical \
@@ -240,7 +235,7 @@ python src/sample_subatomic_edm_ckpt.py \
 
 ### CSP post-training evaluation
 
-There is no single first-class standalone CSP checkpoint-eval CLI analogous to `src/eval_subatomic_edm_ckpt.py` at the moment. Current standalone CSP evaluation is script-driven; for advanced preset or grid-style runs, see the relevant utilities under `scripts/`, for example:
+There is no single first-class standalone CSP checkpoint-eval CLI analogous to `src/eval_crystalite_ckpt.py` at the moment. Current standalone CSP evaluation is script-driven; for advanced preset or grid-style runs, see the relevant utilities under `scripts/`, for example:
 
 - `scripts/grid_csp_inference.py`
 - `scripts/eval_csp_mpts52_test_presets.py`
@@ -303,7 +298,7 @@ The default shared glob is `data/mlip/nequip/*.nequip.pt2`.
 Optional NequIP-based DNG checkpoint eval:
 
 ```bash
-python src/eval_subatomic_edm_ckpt.py \
+python src/eval_crystalite_ckpt.py \
   --train_output_dir outputs/dng_mp20 \
   --checkpoint_preference best \
   --num_samples 2048 \
