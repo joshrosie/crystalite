@@ -352,6 +352,41 @@ def _resolve_nequip_device(stability_device: str) -> str:
     return stability_device
 
 
+def _cast_atomic_data_floating_tensors(
+    data: dict[str, torch.Tensor],
+    *,
+    dtype: torch.dtype,
+) -> dict[str, torch.Tensor]:
+    out = dict(data)
+    for key, value in out.items():
+        if torch.is_tensor(value) and value.is_floating_point() and value.dtype != dtype:
+            out[key] = value.to(dtype=dtype)
+    return out
+
+
+def patch_nequip_ase_calc_float64_inputs(calculator):
+    """Force float64 graph inputs for NequIP ASE calculator calls.
+
+    NequIP's ASE integration builds tensors through ``from_ase()``, which follows
+    ``torch.get_default_dtype()``. We restore the caller's default dtype after
+    loading compiled models, so without an explicit cast the sequential ASE path
+    can end up feeding float32 positions/cells into a float64-oriented model.
+    """
+
+    if getattr(calculator, "_atomreps_float64_ase_inputs_patch", False):
+        return calculator
+
+    original_atoms_to_data = calculator.atoms_to_data
+
+    def _patched_atoms_to_data(self, atoms):
+        data = original_atoms_to_data(atoms)
+        return _cast_atomic_data_floating_tensors(data, dtype=torch.float64)
+
+    calculator.atoms_to_data = MethodType(_patched_atoms_to_data, calculator)
+    calculator._atomreps_float64_ase_inputs_patch = True
+    return calculator
+
+
 def make_nequip_ase_calculator(compiled_model: str, stability_device: str):
     try:  # required only for some compiled model backends
         import cuequivariance_torch  # noqa: F401
@@ -359,7 +394,7 @@ def make_nequip_ase_calculator(compiled_model: str, stability_device: str):
     except ImportError:
         pass
 
-    from nequip.ase import NequIPCalculator
+    from nequip.integrations.ase import NequIPCalculator
 
     stability_device = _resolve_nequip_device(stability_device)
 
@@ -371,6 +406,7 @@ def make_nequip_ase_calculator(compiled_model: str, stability_device: str):
                 compile_path=compiled_model,
                 device=stability_device,
             )
+            calc = patch_nequip_ase_calc_float64_inputs(calc)
     finally:
         # NequIP compiled model loading mutates torch global default dtype.
         torch.set_default_dtype(prev_default_dtype)
@@ -490,10 +526,13 @@ class NequIPRelaxer:
         nsteps = 0
         if steps > 0:
             with self.optimizer_cls(target, logfile=None) as optimizer:
-                for _ in optimizer.irun(fmax=self.fmax, steps=steps):
+                for _ in range(steps):
+                    optimizer.step()
                     forces = target.get_forces()
                     if forces.size:
                         max_force = float(np.linalg.norm(forces, axis=1).max())
+                        if not np.isfinite(max_force):
+                            raise RuntimeError("Non-finite force detected during relaxation")
                         if np.isfinite(self.max_force_abort) and max_force > self.max_force_abort:
                             raise RuntimeError(
                                 "Force divergence detected: "
@@ -504,6 +543,8 @@ class NequIPRelaxer:
         final_atoms = target.atoms if hasattr(target, "atoms") else target
         final_structure = ase_to_pmg(final_atoms)
         total_energy = float(final_atoms.get_potential_energy())
+        if not np.isfinite(total_energy):
+            raise RuntimeError("Non-finite final energy detected during relaxation")
         return {
             "final_structure": final_structure,
             "trajectory": _EnergyTrajectory([total_energy]),
