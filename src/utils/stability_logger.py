@@ -110,15 +110,6 @@ class StabilityLogger:
                         "Unsupported NequIP relax mode. "
                         "Choose from: sequential, batch."
                     )
-                _, relaxer, _, _ = make_nequip_relaxer(
-                    compile_path=self.thermo_cfg.nequip_compile_path,
-                    stability_device=self.thermo_cfg.device,
-                    optimizer_name=self.thermo_cfg.nequip_optimizer,
-                    cell_filter=self.thermo_cfg.nequip_cell_filter,
-                    fmax=self.thermo_cfg.nequip_fmax,
-                    max_force_abort=self.thermo_cfg.nequip_max_force_abort,
-                )
-                self._thermo_relaxer = relaxer
                 self._thermo_nequip_relax_mode = relax_mode
                 if relax_mode == "batch":
                     _, batch_relaxer, _, _ = make_nequip_batch_relaxer(
@@ -128,7 +119,18 @@ class StabilityLogger:
                         cell_filter=self.thermo_cfg.nequip_cell_filter,
                         max_force_abort=self.thermo_cfg.nequip_max_force_abort,
                     )
+                    self._thermo_relaxer = batch_relaxer
                     self._thermo_batch_relaxer = batch_relaxer
+                else:
+                    _, relaxer, _, _ = make_nequip_relaxer(
+                        compile_path=self.thermo_cfg.nequip_compile_path,
+                        stability_device=self.thermo_cfg.device,
+                        optimizer_name=self.thermo_cfg.nequip_optimizer,
+                        cell_filter=self.thermo_cfg.nequip_cell_filter,
+                        fmax=self.thermo_cfg.nequip_fmax,
+                        max_force_abort=self.thermo_cfg.nequip_max_force_abort,
+                    )
+                    self._thermo_relaxer = relaxer
             else:
                 raise ValueError(f"Unsupported thermo MLIP backend: {backend!r}")
 

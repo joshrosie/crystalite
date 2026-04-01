@@ -321,6 +321,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--thermo_ppd_mp", type=str, default=None)
     parser.add_argument("--nequip_compile_path", type=str, default=None)
+    parser.add_argument(
+        "--nequip_relax_mode",
+        type=str,
+        default=None,
+        choices=["sequential", "batch"],
+    )
     parser.add_argument("--nequip_optimizer", type=str, default=None)
     parser.add_argument("--nequip_cell_filter", type=str, default=None)
     parser.add_argument("--nequip_fmax", type=float, default=None)
@@ -639,6 +645,14 @@ def main() -> None:
                         model_args,
                         "nequip_compile_path",
                         "",
+                    )
+                ),
+                nequip_relax_mode=str(
+                    _cfg_value(
+                        args.nequip_relax_mode,
+                        model_args,
+                        "nequip_relax_mode",
+                        "sequential",
                     )
                 ),
                 nequip_optimizer=str(

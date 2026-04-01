@@ -318,29 +318,195 @@ def make_chgnet_ase_calculator(chgnet, stability_device: str):
     return CHGNetCalculator()
 
 
-def resolve_nequip_compiled_model(compile_path: str | Path) -> str:
-    path = Path(compile_path)
-    if path.is_file():
-        return str(path.resolve())
+def _nequip_repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
 
-    candidates = set(glob(str(path)))
+
+def _iter_nequip_search_paths(path: Path) -> list[Path]:
+    roots = [path]
     if not path.is_absolute():
-        repo_path = Path(__file__).resolve().parents[2] / path
-        if repo_path.is_file():
-            return str(repo_path.resolve())
-        candidates.update(glob(str(repo_path)))
+        repo_path = _nequip_repo_root() / path
+        if repo_path != path:
+            roots.append(repo_path)
+    return roots
 
-    resolved = sorted(str(Path(p).resolve()) for p in candidates if Path(p).is_file())
-    if len(resolved) == 1:
-        return resolved[0]
-    if len(resolved) > 1:
-        msg = ", ".join(resolved[:5])
+
+def _is_glob_pattern(path: Path) -> bool:
+    return any(ch in str(path) for ch in "*?[]")
+
+
+def _resolve_explicit_nequip_file(compile_path: str | Path) -> Path | None:
+    path = Path(compile_path)
+    for candidate in _iter_nequip_search_paths(path):
+        if candidate.is_file():
+            if not str(candidate).endswith(".nequip.pt2"):
+                raise ValueError(
+                    "NequIP thermo/runtime expects AOTInductor `.nequip.pt2` artifacts. "
+                    f"Got direct file path: {candidate!s}"
+                )
+            return candidate.resolve()
+    return None
+
+
+def _collect_nequip_compiled_model_candidates(compile_path: str | Path) -> list[Path]:
+    path = Path(compile_path)
+    candidates: set[Path] = set()
+
+    for root in _iter_nequip_search_paths(path):
+        if root.is_dir():
+            candidates.update(p.resolve() for p in root.rglob("*.nequip.pt2"))
+            continue
+        if _is_glob_pattern(root):
+            candidates.update(
+                Path(p).resolve()
+                for p in glob(str(root), recursive=True)
+                if Path(p).is_file() and str(p).endswith(".nequip.pt2")
+            )
+
+    return sorted(candidates)
+
+
+def _nequip_target_input_keys() -> dict[str, tuple[str, ...]]:
+    from nequip.scripts._compile_utils import (
+        AOTI_ASE_TARGET,
+        AOTI_BATCH_TARGET,
+        COMPILE_TARGET_DICT,
+    )
+
+    return {
+        "ase": tuple(COMPILE_TARGET_DICT[AOTI_ASE_TARGET]["input"]),
+        "batch": tuple(COMPILE_TARGET_DICT[AOTI_BATCH_TARGET]["input"]),
+    }
+
+
+def _inspect_nequip_compiled_model(path: str | Path) -> dict[str, Any]:
+    from nequip.utils.aoti_metadata import NEQUIP_AOTI_INPUTS_KEY, parse_aoti_keys
+
+    model_path = Path(path).resolve()
+    compiled_model = torch._inductor.aoti_load_package(
+        str(model_path),
+        run_single_threaded=True,
+    )
+    metadata = dict(compiled_model.get_metadata())
+    del compiled_model
+
+    serialized_inputs = metadata.get(NEQUIP_AOTI_INPUTS_KEY)
+    if not serialized_inputs:
+        raise ValueError(
+            "Compiled model is missing `nequip_aoti_inputs` metadata. "
+            "Recompile with a newer `nequip-compile`."
+        )
+
+    input_keys = tuple(parse_aoti_keys(serialized_inputs))
+    for target, expected_inputs in _nequip_target_input_keys().items():
+        if input_keys == expected_inputs:
+            return {
+                "path": str(model_path),
+                "target": target,
+                "input_keys": input_keys,
+            }
+
+    raise ValueError(
+        "Compiled model inputs do not match NequIP ASE or batch targets. "
+        f"Found inputs: {list(input_keys)!r}"
+    )
+
+
+def _format_nequip_candidate_detail(path: str, *, target: str | None, error: str | None) -> str:
+    if target is not None:
+        return f"{path} [target={target}]"
+    if error:
+        return f"{path} [uninspectable: {error}]"
+    return f"{path} [target=unknown]"
+
+
+def resolve_nequip_compiled_model(
+    compile_path: str | Path,
+    *,
+    expected_target: str | None = None,
+) -> str:
+    if expected_target is not None and expected_target not in {"ase", "batch"}:
+        raise ValueError(
+            f"Unsupported expected NequIP target {expected_target!r}. "
+            "Choose from: ase, batch."
+        )
+
+    explicit_file = _resolve_explicit_nequip_file(compile_path)
+    if explicit_file is not None:
+        if expected_target is None:
+            return str(explicit_file)
+        info = _inspect_nequip_compiled_model(explicit_file)
+        if info["target"] != expected_target:
+            raise ValueError(
+                "NequIP compiled model target mismatch: "
+                f"requested {expected_target!r}, but `{explicit_file}` is "
+                f"target={info['target']!r}."
+            )
+        return str(explicit_file)
+
+    candidates = _collect_nequip_compiled_model_candidates(compile_path)
+    if not candidates:
+        target_msg = f" for target={expected_target}" if expected_target else ""
         raise FileNotFoundError(
-            f"Matched {len(resolved)} NequIP models for {compile_path!r} "
+            "Could not resolve any NequIP `.nequip.pt2` artifacts "
+            f"from {compile_path!r}{target_msg}."
+        )
+
+    if expected_target is None:
+        if len(candidates) == 1:
+            return str(candidates[0])
+        msg = ", ".join(str(path) for path in candidates[:5])
+        raise FileNotFoundError(
+            f"Matched {len(candidates)} NequIP models for {compile_path!r} "
             f"(first 5: {msg}). Please provide a specific path."
         )
-    raise FileNotFoundError(
-        f"Could not resolve NequIP compiled model from {compile_path!r}."
+
+    inspected: list[dict[str, Any]] = []
+    matched: list[str] = []
+    for candidate in candidates:
+        try:
+            info = _inspect_nequip_compiled_model(candidate)
+            inspected.append(
+                {
+                    "path": info["path"],
+                    "target": info["target"],
+                    "error": None,
+                }
+            )
+            if info["target"] == expected_target:
+                matched.append(info["path"])
+        except Exception as exc:
+            inspected.append(
+                {
+                    "path": str(candidate),
+                    "target": None,
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                }
+            )
+
+    if len(matched) == 1:
+        return matched[0]
+
+    details = "; ".join(
+        _format_nequip_candidate_detail(
+            item["path"],
+            target=item["target"],
+            error=item["error"],
+        )
+        for item in inspected[:10]
+    )
+
+    if not matched:
+        raise FileNotFoundError(
+            "Could not find a NequIP compiled model matching "
+            f"target={expected_target!r} from {compile_path!r}. "
+            f"Candidates: {details}"
+        )
+
+    raise ValueError(
+        "Matched multiple NequIP compiled models for "
+        f"target={expected_target!r} from {compile_path!r}. "
+        f"Candidates: {details}"
     )
 
 
@@ -688,7 +854,7 @@ def make_nequip_relaxer(
         allowed = ", ".join(sorted(filter_map))
         raise ValueError(f"Unsupported NequIP cell filter {cell_filter!r}. Choose from: {allowed}")
 
-    model_path = resolve_nequip_compiled_model(compile_path)
+    model_path = resolve_nequip_compiled_model(compile_path, expected_target="ase")
     calc, resolved_device = make_nequip_ase_calculator(
         compiled_model=model_path,
         stability_device=stability_device,
@@ -724,7 +890,7 @@ def make_nequip_batch_relaxer(
             f"Got: {cell_filter!r}"
         )
 
-    model_path = resolve_nequip_compiled_model(compile_path)
+    model_path = resolve_nequip_compiled_model(compile_path, expected_target="batch")
     calc, resolved_device = make_nequip_batch_calculator(
         compiled_model=model_path,
         stability_device=stability_device,

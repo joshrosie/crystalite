@@ -273,20 +273,32 @@ Pass the path with `--ppd_path mp_02072023/2023-02-07-ppd-mp.pkl`, or set `therm
 
 The recommended NequIP model is [NequIP-OAM-L v0.1](https://www.nequip.net/models/mir-group/NequIP-OAM-L:0.1). It must be compiled to a `.nequip.pt2` file before use.
 
-Compile for GPU (AOTInductor):
+Compile runtime targets for GPU depending on whether you will do sequential or batch relaxation:
 
 ```bash
 nequip-compile \
   mir-group/NequIP-OAM-L:0.1 \
-  data/mlip/nequip/NequIP-OAM-L.nequip.pt2 \
+  data/mlip/nequip/NequIP-OAM-L-ase.nequip.pt2 \
   --mode aotinductor \
   --device cuda \
   --target ase
+
+nequip-compile \
+  mir-group/NequIP-OAM-L:0.1 \
+  data/mlip/nequip/NequIP-OAM-L-batch.nequip.pt2 \
+  --mode aotinductor \
+  --device cuda \
+  --target batch
 ```
 
 For CPU inference, replace `--device cuda` with `--device cpu`.
 
-Place the compiled file anywhere under a directory matched by `--nequip_compile_path`. The default glob is `data/mlip/nequip/*.nequip.pt2`.
+Point `--nequip_compile_path` at either a single `.nequip.pt2` file, a directory, or a glob. When multiple AOT artifacts are available, the runtime will resolve the correct one from `--nequip_relax_mode`:
+
+- `sequential` -> picks the `--target ase` artifact
+- `batch` -> picks the `--target batch` artifact
+
+The default shared glob is `data/mlip/nequip/*.nequip.pt2`.
 
 Optional NequIP-based DNG checkpoint eval:
 
@@ -297,10 +309,11 @@ python src/eval_subatomic_edm_ckpt.py \
   --num_samples 2048 \
   --thermo_count 256 \
   --thermo_mlip nequip \
+  --nequip_relax_mode batch \
   --nequip_compile_path "data/mlip/nequip/*.nequip.pt2"
 ```
 
-If you want batched NequIP relaxation during train-time thermo eval, use `--thermo_mlip nequip --nequip_relax_mode batch`. That path is only valid for NequIP.
+If you want batched NequIP relaxation during train-time thermo eval or checkpoint eval, use `--thermo_mlip nequip --nequip_relax_mode batch`. That path is only valid for NequIP.
 
 ## Outputs and Artifacts
 
