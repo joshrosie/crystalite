@@ -4,7 +4,7 @@
 
 ---
 >[!WARNING]
->This is a pre-release of the `crystalite` codebase and is not necessarily representative of the final working product.
+>This is an early release of the `crystalite` codebase. It has undergone a major refactor so everything might not be working 100% just yet. We will be updating this repo regularly so please feel free to reach out if you encounter any issues.
 
 
 `crystalite` is a codebase for tokenized crystal representations, EDM-based generation, and evaluation for two workflows:
