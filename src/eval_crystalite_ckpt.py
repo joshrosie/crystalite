@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from src.data.mp20_tokens import MP20Tokens, VZ
-from src.data.type_encoding import build_type_encoding
+from src.models.type_encoding import build_type_encoding
 from src.crystalite import CrystaliteModel, mod1
 from src.crystalite.sampler import clamp_lattice_latent as _clamp_lattice_latent, edm_sampler
 from src.eval.dng_eval import (

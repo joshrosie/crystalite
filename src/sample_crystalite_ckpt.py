@@ -23,7 +23,7 @@ from pymatgen.core.periodic_table import Element
 from pymatgen.io.cif import CifWriter
 
 from src.data.mp20_tokens import MP20Tokens, VZ, tokens_to_structure
-from src.data.type_encoding import build_type_encoding
+from src.models.type_encoding import build_type_encoding
 from src.crystalite import CrystaliteModel, mod1
 from src.crystalite.sampler import clamp_lattice_latent as _clamp_lattice_latent, edm_sampler
 from src.models.lattice_repr import lattice_latent_to_y1

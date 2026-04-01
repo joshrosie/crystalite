@@ -2,7 +2,7 @@ from pathlib import Path
 
 import torch
 from src.data.mp20_tokens import VZ, tokens_to_structure
-from src.data.type_encoding import TypeEncoding
+from src.models.type_encoding import TypeEncoding
 
 def compute_dataset_element_distribution(dataset) -> torch.Tensor | None:
     counts = torch.zeros(VZ + 1, dtype=torch.float64)

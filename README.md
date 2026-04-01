@@ -104,9 +104,9 @@ uv run python src/data/download_datasets.py --datasets all
 For the atom-type channel, the current training code supports multiple element representations through `--type_encoding`:
 
 - `atomic_number`: direct element-channel encoding, used by default
-- `periodic_table_2d`: CrystalFlow-style row/column periodic-table encoding
-- `electron_config`: ground-state electron-configuration features
-- `chem_raw_v2` and `chem_pca_v2_*`: hand-crafted chemistry descriptors, either raw or PCA-compressed
+- `subatomic_tokenizer_raw`: hand-crafted subatomic-tokenizer descriptor features
+- `subatomic_tokenizer_pca`: default PCA-compressed subatomic-tokenizer descriptor (`subatomic_tokenizer_pca_24`)
+- `subatomic_tokenizer_pca_8`, `subatomic_tokenizer_pca_16`, `subatomic_tokenizer_pca_24`: explicit PCA dimensionality presets
 
 These representations affect how atom types are encoded and decoded inside the EDM model. In DNG mode they shape the sampled atom-type path; in CSP mode atom types are fixed, but the chosen representation still determines the internal type features seen by the model.
 

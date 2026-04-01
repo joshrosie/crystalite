@@ -94,8 +94,10 @@ def build_parser() -> argparse.ArgumentParser:
             "subatomic_tokenizer_pca_24",
         ],
         help=(
-            "Atom-type encoding mode for EDM: atomic-number channels, "
-            "or the subatomic tokenizer family (raw / PCA-compressed)."
+            "Atom-type encoding mode for EDM: direct atomic-number channels, "
+            "subatomic_tokenizer_raw, or the PCA-compressed subatomic tokenizer "
+            "family. The shorthand subatomic_tokenizer_pca resolves to "
+            "subatomic_tokenizer_pca_24."
         ),
     )
     parser.add_argument(

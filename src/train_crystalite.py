@@ -34,7 +34,7 @@ from src.data.mp20_tokens import (
 
 from src.eval.stability import _compute_thermo_metrics
 from src.eval.wasserstein import _compute_wasserstein_metrics
-from src.data.type_encoding import build_type_encoding
+from src.models.type_encoding import build_type_encoding
 from src.models.lattice_repr import (
     lattice_latent_to_y1,
     y1_to_lattice_latent,
