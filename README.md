@@ -341,4 +341,10 @@ Optional checkpoint-eval artifacts include:
 
 If W&B logging is enabled during training, metrics and rendered sample images are also logged there.
 
+## License
+
+- The source code in this repository is licensed under the [MIT License](./LICENSE-CODE).
+- The model weights and pretrained checkpoints are licensed under
+  [CC BY-NC-SA 4.0](./LICENSE-MODEL).
+
 Logo design by [Dee Vasilevskaia](https://deevasilevskaia.com/).
