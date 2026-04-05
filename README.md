@@ -341,4 +341,17 @@ Optional checkpoint-eval artifacts include:
 
 If W&B logging is enabled during training, metrics and rendered sample images are also logged there.
 
+## Citation
+```
+@misc{veljković2026crystalitelightweighttransformerefficient,
+      title={Crystalite: A Lightweight Transformer for Efficient Crystal Modeling}, 
+      author={Tin Hadži Veljković and Joshua Rosenthal and Ivor Lončarić and Jan-Willem van de Meent},
+      year={2026},
+      eprint={2604.02270},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2604.02270}, 
+}
+```
+
 Logo design by [Dee Vasilevskaia](https://deevasilevskaia.com/).
