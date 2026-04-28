@@ -21,6 +21,10 @@ Both workflows use the same main training entrypoint, `src/train_crystalite.py`,
 - [Environment Setup](#environment-setup)
 - [Data and Representation](#data-and-representation)
   - [Atom representations](#atom-representations)
+- [Pretrained DNG Checkpoint](#pretrained-dng-checkpoint)
+  - [Sampling from the pretrained checkpoint](#sampling-from-the-pretrained-checkpoint)
+  - [Full DNG evaluation with NequIP relaxation](#full-dng-evaluation-with-nequip-relaxation)
+  - [Reference metrics](#reference-metrics)
 - [Training Workflows](#training-workflows)
   - [DNG training](#dng-training)
   - [CSP training](#csp-training)
@@ -109,6 +113,118 @@ For the atom-type channel, the current training code supports multiple element r
 - `subatomic_tokenizer_pca_8`, `subatomic_tokenizer_pca_16`, `subatomic_tokenizer_pca_24`: explicit PCA dimensionality presets
 
 These representations affect how atom types are encoded and decoded inside the EDM model. In DNG mode they shape the sampled atom-type path; in CSP mode atom types are fixed, but the chosen representation still determines the internal type features seen by the model.
+
+## Pretrained DNG Checkpoint
+
+A pretrained DNG checkpoint is available on Hugging Face and strict-loads into the current `CrystaliteModel`:
+
+> [joshrosie/crystalite-datasets/best.pt](https://huggingface.co/datasets/joshrosie/crystalite-datasets/blob/main/best.pt)
+
+It was trained on MP20 with `subatomic_tokenizer_pca_16` atom typing. The checkpoint carries `model_args`, EDM/sampler parameters, and EMA weights, all of which are read automatically by `src/sample_crystalite_ckpt.py` and `src/eval_crystalite_ckpt.py`. Use `--sample_mode ema` for normal sampling and evaluation.
+
+Key configuration:
+
+```text
+type_encoding: subatomic_tokenizer_pca_16
+type_dim: 16
+d_model: 512
+n_heads: 16
+n_layers: 14
+ema_decay: 0.9999
+```
+
+### Sampling from the pretrained checkpoint
+
+```bash
+CKPT=/path/to/best.pt
+
+python src/sample_crystalite_ckpt.py \
+  --checkpoint "$CKPT" \
+  --dataset_name mp20 \
+  --data_root data/mp20 \
+  --nmax 20 \
+  --num_samples 512 \
+  --sample_chunk_size 128 \
+  --sample_seed 123 \
+  --sample_num_steps 150 \
+  --sample_mode ema \
+  --atom_count_strategy empirical \
+  --bf16 \
+  --output_dir outputs/pretrained_pca16/samples \
+  --save_pt \
+  --save_cifs \
+  --cif_limit 512
+```
+
+`--atom_count_strategy empirical` reads MP20 to sample realistic atom counts. To skip dataset access entirely, pass `--atom_count_strategy fixed --fixed_num_atoms <N>` instead.
+
+### Full DNG evaluation with NequIP relaxation
+
+This is a complete metrics run with NequIP-driven thermodynamic stability:
+
+```bash
+CKPT=/path/to/best.pt
+THERMO_PPD_MP=mp_02072023/2023-02-07-ppd-mp.pkl
+NEQUIP_MODEL=data/mlip/nequip/NequIP-OAM-L-ase.nequip.zip
+
+python src/eval_crystalite_ckpt.py \
+  --checkpoint "$CKPT" \
+  --dataset_name mp20 \
+  --data_root data/mp20 \
+  --nmax 20 \
+  --num_samples 512 \
+  --sample_chunk_size 128 \
+  --sample_seed 123 \
+  --sample_num_steps 150 \
+  --sample_mode ema \
+  --atom_count_strategy empirical \
+  --eval_jobs 16 \
+  --bf16 \
+  --compute_novelty \
+  --compute_wasserstein \
+  --compute_structure_stats \
+  --thermo_count 512 \
+  --thermo_stability_batch 64 \
+  --thermo_relax_steps 200 \
+  --thermo_stability_device cuda \
+  --thermo_mlip nequip \
+  --thermo_ehull_method mp2020_like \
+  --thermo_ppd_mp "$THERMO_PPD_MP" \
+  --nequip_compile_path "$NEQUIP_MODEL" \
+  --nequip_relax_mode sequential \
+  --nequip_optimizer FIRE \
+  --nequip_cell_filter frechet \
+  --nequip_fmax 0.005 \
+  --nequip_max_force_abort 1000000 \
+  --report_dir outputs/pretrained_pca16/eval_reports \
+  --run_name pretrained_pca16_eval512 \
+  --save_samples_pt \
+  --save_sun_samples
+```
+
+Notes:
+
+- A NequIP saved-model `.zip` (or `nequip.net:mir-group/NequIP-OAM-L:0.1`) with `--nequip_relax_mode sequential` is a portable alternative to a compiled `.nequip.pt2` artifact, and avoids `GLIBC_2.38` issues seen on some clusters.
+- The phase-diagram pickle (`2023-02-07-ppd-mp.pkl`) is the same one described in [Phase diagram (hull)](#phase-diagram-hull).
+
+### Reference metrics
+
+512 samples, NequIP relaxation, sequential mode, `sample_seed: 123`:
+
+```text
+valid_rate:               0.828
+unique_rate:              0.994
+novel_rate:               0.789
+un_rate:                  0.787
+SUN:                      0.111
+MSUN:                     0.558
+sun_count:                46
+nequip stability:         0.141
+nequip metastability:     0.709
+nequip e_above_hull_mean: 0.073
+wdist_density_atomic:     0.001
+wdist_nary:               0.137
+```
 
 ## Training Workflows
 
