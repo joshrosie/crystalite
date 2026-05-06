@@ -248,6 +248,37 @@ Behavior:
 - train-time sampling logs DNG metrics
 - `--best_ckpt` tracks the best checkpoint using the configured DNG metric policy
 
+PCA-16 EDM training recipe:
+
+```bash
+python src/train_crystalite.py \
+  --data_root data/mp20 \
+  --dataset_name mp20 \
+  --output_dir outputs/dng_mp20_pca16 \
+  --nmax 20 \
+  --batch_size 128 \
+  --bf16 \
+  --max_steps 2500000 \
+  --type_encoding subatomic_tokenizer_pca_16 \
+  --d_model 512 \
+  --n_heads 16 \
+  --n_layers 14 \
+  --use_edge_bias \
+  --edge_bias_n_freqs 12 \
+  --edge_bias_hidden_dim 256 \
+  --edge_bias_n_rbf 32 \
+  --lattice_embed_mode mlp \
+  --lattice_repr ltri \
+  --loss_weights 16 150 5 \
+  --coord_loss_mode frac_mse \
+  --sigma_data_type 0.3 \
+  --sigma_data_coord 0.3 \
+  --sigma_data_lattice 0.3 \
+  --best_ckpt
+```
+
+These flags intentionally override the generic CLI defaults. In particular, use the explicit `subatomic_tokenizer_pca_16` preset for PCA-16 training; the shorthand `subatomic_tokenizer_pca` resolves to PCA-24.
+
 ### CSP training
 
 Canonical CSP run:
@@ -287,6 +318,25 @@ These metrics are driven by the train-time sampling settings such as:
 - `--sample_count`
 - `--sample_mode`
 - `--sample_num_steps`
+
+Sampler and sampling-metric flags are separate from the gradient-training loss. `--sample_frequency 0` disables train-time sampling; when sampling is disabled, the remaining flags in this block are recorded in config but not executed during training. Set `--sample_frequency` to a positive step interval to run the sampler and metrics during training.
+
+```bash
+--sample_frequency 0
+--sample_count 2048
+--sample_num_steps 150
+--sample_chunk_size 2048
+--sample_vis_count 5
+--sample_compute_novelty
+--sample_novelty_limit -1
+--rho 7
+--S_churn 60
+--S_noise 1.003
+--aa_rho_coords 10
+--aa_rho_lattice 10
+```
+
+Here `--sample_*` controls train-time sample generation and sample metrics, `--rho`/`--S_*` control the EDM sampler schedule and stochastic churn, and `--aa_rho_*` controls anti-annealing drift during sampling.
 
 ### CSP train-time evaluation
 
