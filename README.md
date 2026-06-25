@@ -340,6 +340,41 @@ Behavior:
 - CSP mode zeroes the type-loss path and evaluates reconstruction quality instead of DNG novelty metrics
 - precise CSP sampling can report best-of-k metrics via `--csp_precise_topk_list` and `--csp_precise_topk_samples`
 
+CSP EDM training recipe (reproduces the pretrained MP-20 CSP checkpoint):
+
+```bash
+python src/train_crystalite.py \
+  --csp \
+  --data_root data/mp20 \
+  --dataset_name mp20 \
+  --output_dir outputs/csp_mp20 \
+  --nmax 20 \
+  --bf16 \
+  --max_steps 1400000 \
+  --type_encoding atomic_number \
+  --d_model 1024 \
+  --n_heads 16 \
+  --n_layers 14 \
+  --use_distance_bias \
+  --use_edge_bias \
+  --ema_decay 0.99999 \
+  --sample_frequency 1000 \
+  --sample_count 256 \
+  --best_ckpt
+```
+
+These flags reproduce the model_args carried by `csp_mp20_best.pt` (see [Pretrained CSP Checkpoints](#pretrained-csp-checkpoints)). For the larger `csp_mpts52_best.pt` checkpoint, change the dataset and adjust the three hyperparameters that differ in that config:
+
+```bash
+  --data_root data/mpts_52 \
+  --dataset_name mpts_52 \
+  --max_steps 2300000 \
+  --ema_decay 0.9999 \
+  # drop --use_distance_bias (MPTS-52 uses edge bias only)
+```
+
+In CSP mode the type weight in `--loss_weights` is ignored because the type-loss path is zeroed; only the coordinate and lattice terms are trained.
+
 ## Evaluation Workflows
 
 ### DNG train-time evaluation
