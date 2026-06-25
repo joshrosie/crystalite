@@ -25,6 +25,8 @@ Both workflows use the same main training entrypoint, `src/train_crystalite.py`,
   - [Sampling from the pretrained checkpoint](#sampling-from-the-pretrained-checkpoint)
   - [Full DNG evaluation with NequIP relaxation](#full-dng-evaluation-with-nequip-relaxation)
   - [Reference metrics](#reference-metrics)
+- [Pretrained CSP Checkpoints](#pretrained-csp-checkpoints)
+  - [CSP reference metrics](#csp-reference-metrics)
 - [Training Workflows](#training-workflows)
   - [DNG training](#dng-training)
   - [CSP training](#csp-training)
@@ -226,6 +228,44 @@ wdist_density_atomic:     0.001
 wdist_nary:               0.137
 ```
 
+## Pretrained CSP Checkpoints
+
+Two pretrained CSP checkpoints are available on Hugging Face (alongside the DNG checkpoint) and strict-load into the current `CrystaliteModel`:
+
+> [joshrosie/crystalite-datasets/csp_mp20_best.pt](https://huggingface.co/datasets/joshrosie/crystalite-datasets/blob/main/csp_mp20_best.pt)
+>
+> [joshrosie/crystalite-datasets/csp_mpts52_best.pt](https://huggingface.co/datasets/joshrosie/crystalite-datasets/blob/main/csp_mpts52_best.pt)
+
+Both were trained with `atomic_number` atom typing for crystal structure prediction (atom types are held fixed; the model predicts coordinates + lattice). The checkpoints carry `model_args`, EDM/sampler parameters, and EMA weights, all read automatically by `src/eval_csp_ckpt.py`. Use `--sample_mode ema` for evaluation.
+
+Key configuration:
+
+```text
+                     MP-20            MPTS-52
+type_encoding:       atomic_number    atomic_number
+type_dim:            95               95
+d_model:             1024             1024
+n_heads:             16               16
+n_layers:            14               14
+use_distance_bias:   true             false
+use_edge_bias:       true             true
+ema_decay:           0.99999          0.9999
+checkpoint_step:     1400000          2300000
+```
+
+### CSP reference metrics
+
+Full test split, EMA weights, `num_steps: 400`, `rho: 7`, `S_churn: 30`, `S_noise: 1.003`, coordinate and lattice anti-annealing both set to `4.0` (`--aa_rho_coords_values 4 --aa_rho_lattice_values 4`):
+
+```text
+                   MP-20      MPTS-52
+match_rate:        0.661      0.317
+mean RMSD:         0.033      0.072
+matched / total:   5975/9045  2570/8096
+```
+
+Reproduce (per dataset) with the canonical command in [CSP post-training evaluation](#csp-post-training-evaluation); MPTS-52 uses `--data_root data/mpts_52 --dataset_name mpts_52`. The checkpoints store `aa_rho_lattice=0`, so pass `--aa_rho_lattice_values 4` explicitly to match the numbers above.
+
 ## Training Workflows
 
 ### DNG training
@@ -401,10 +441,39 @@ python src/sample_crystalite_ckpt.py \
 
 ### CSP post-training evaluation
 
-There is no single first-class standalone CSP checkpoint-eval CLI analogous to `src/eval_crystalite_ckpt.py` at the moment. Current standalone CSP evaluation is script-driven; for advanced preset or grid-style runs, see the relevant utilities under `scripts/`, for example:
+The first-class standalone CSP checkpoint-eval entrypoint is `src/eval_csp_ckpt.py` (the CSP analogue of `src/eval_crystalite_ckpt.py`). It holds each target composition's atom types fixed, samples coordinates + lattice, and reports `pymatgen` `StructureMatcher` match-rate and RMSD against the ground-truth structures of a dataset split. It reuses the same sampling + matching machinery as CSP train-time evaluation, so standalone numbers line up with the `csp_val_match_rate` reported during training.
 
-- `scripts/grid_csp_inference.py`
-- `scripts/eval_csp_mpts52_test_presets.py`
+Canonical CSP checkpoint eval (full test split):
+
+```bash
+python src/eval_csp_ckpt.py \
+  --checkpoint outputs/csp_mp20/checkpoints/best.pt \
+  --data_root data/mp20 \
+  --dataset_name mp20 \
+  --split test \
+  --num_samples 0 \
+  --sample_mode ema \
+  --aa_rho_coords_values 4 \
+  --aa_rho_lattice_values 4 \
+  --output_csv outputs/csp_eval/mp20_test.csv
+```
+
+This path computes:
+
+- match-rate and mean matched RMSD (single-candidate)
+- optional best-of-k metrics (`--csp_precise_topk_list 1 20 --csp_precise_topk_samples N`)
+- an anti-annealing grid ablation: pass multiple values to `--aa_rho_coords_values` / `--aa_rho_lattice_values` and one CSV row is written per cell of the cross product
+
+Key flags:
+
+- checkpoint resolution mirrors the DNG CLI: pass `--checkpoint <path>` directly, or `--train_output_dir <run>` with `--checkpoint_preference {auto,best,final,step_latest,epoch_latest}`
+- `--target_selection {sequential,random}` chooses the evaluated targets (sequential = first `--num_samples`; `0` = full split)
+- `--seed_mode step_offset` reproduces train-time seeding (`base_seed = sample_seed + step`); use `fixed` to seed with `--sample_seed` alone
+- sampler settings (`--sample_num_steps`, `--rho`, `--s_churn`, `--s_min/--s_max/--s_noise`, `--bf16`) default to the checkpoint's `model_args` and can be overridden
+- `--save_pt` / `--no-save_pt` controls whether the sampled structures are dumped per grid cell (saved by default)
+- outputs a CSV plus a sibling JSON summary; `--overwrite` replaces existing files
+
+> Note: checkpoints may store `aa_rho_lattice=0`. To reproduce a reported number that used lattice anti-annealing, pass the intended value explicitly (e.g. `--aa_rho_lattice_values 4`) rather than relying on the stored default.
 
 ## Thermo Backends
 

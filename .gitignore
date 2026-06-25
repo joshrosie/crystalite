@@ -12,3 +12,8 @@ jobs/
 job_outputs/
 baselines/
 .DS_Store
+
+# Large model checkpoints / packaged artifacts (host on HF, not git)
+*.pt
+*.zip
+/best_csp_checkpoint_package_2026-06-24/
