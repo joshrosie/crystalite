@@ -352,18 +352,31 @@ python src/train_crystalite.py \
   --bf16 \
   --max_steps 1400000 \
   --type_encoding atomic_number \
+  --batch_size 128 \
   --d_model 1024 \
   --n_heads 16 \
   --n_layers 14 \
   --use_distance_bias \
   --use_edge_bias \
+  --edge_bias_n_freqs 12 \
+  --edge_bias_hidden_dim 256 \
+  --edge_bias_n_rbf 32 \
+  --gem_per_layer \
+  --lattice_embed_mode mlp \
+  --lattice_repr ltri \
+  --coord_loss_mode frac_mse \
+  --loss_weights 10 20 10 \
+  --sigma_data_coord 0.3 \
+  --sigma_data_lattice 0.3 \
   --ema_decay 0.99999 \
   --sample_frequency 1000 \
   --sample_count 256 \
   --best_ckpt
 ```
 
-These flags reproduce the model_args carried by `csp_mp20_best.pt` (see [Pretrained CSP Checkpoints](#pretrained-csp-checkpoints)). For the larger `csp_mpts52_best.pt` checkpoint, change the dataset and adjust the three hyperparameters that differ in that config:
+Like the DNG recipe, these flags intentionally override the generic CLI defaults so the architecture and training objective match the released checkpoint; leaving any of them at their defaults produces a different model that will not strict-load against `csp_mp20_best.pt` (see [Pretrained CSP Checkpoints](#pretrained-csp-checkpoints)). The first value of `--loss_weights` (the type weight) is ignored in CSP mode; only the coordinate and lattice terms are trained. `--max_steps` is set to the step at which the best checkpoint was saved; with `--best_ckpt` the run keeps the best checkpoint regardless.
+
+For the larger `csp_mpts52_best.pt` checkpoint, keep the same base recipe and change the dataset plus the three hyperparameters that differ in that config:
 
 ```bash
   --data_root data/mpts_52 \
