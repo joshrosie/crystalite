@@ -374,7 +374,7 @@ python src/train_crystalite.py \
   --best_ckpt
 ```
 
-Like the DNG recipe, these flags intentionally override the generic CLI defaults so the architecture and training objective match the released checkpoint; leaving any of them at their defaults produces a different model that will not strict-load against `csp_mp20_best.pt` (see [Pretrained CSP Checkpoints](#pretrained-csp-checkpoints)). The first value of `--loss_weights` (the type weight) is ignored in CSP mode; only the coordinate and lattice terms are trained. `--max_steps` is set to the step at which the best checkpoint was saved; with `--best_ckpt` the run keeps the best checkpoint regardless.
+Like the DNG recipe, these flags intentionally override the generic CLI defaults so the architecture and training objective match the released checkpoint; leaving any of them at their defaults produces a different model that will not strict-load against `csp_mp20_best.pt` (see [Pretrained CSP Checkpoints](#pretrained-csp-checkpoints)). The first value of `--loss_weights` (the type weight) is ignored in CSP mode because the type-loss path is zeroed; only the coordinate and lattice terms are trained. `--max_steps` is set to the step at which the best checkpoint was saved; with `--best_ckpt` the run keeps the best checkpoint regardless.
 
 For the larger `csp_mpts52_best.pt` checkpoint, keep the same base recipe and change the dataset plus the three hyperparameters that differ in that config:
 
@@ -385,8 +385,6 @@ For the larger `csp_mpts52_best.pt` checkpoint, keep the same base recipe and ch
   --ema_decay 0.9999 \
   # drop --use_distance_bias (MPTS-52 uses edge bias only)
 ```
-
-In CSP mode the type weight in `--loss_weights` is ignored because the type-loss path is zeroed; only the coordinate and lattice terms are trained.
 
 ## Evaluation Workflows
 
