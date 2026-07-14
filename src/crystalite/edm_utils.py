@@ -153,13 +153,17 @@ def compute_edm_loss(
     sigma_lat = sigma.view(-1, 1)
     atoms_per_sample_y = real_mask.float().sum(dim=1).clamp_min(1.0)
 
-    def masked_feature_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def masked_token_reduce(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        # Normalize by real-token count ONLY (not x feature_dim): this matches the
+        # original Crystalite EDM reduction, which sums per-feature errors per token
+        # and divides by the token count, so --loss_weights (1 50 5) keep their
+        # intended type:coord:lattice balance. Dividing additionally by feature_dim
+        # (16 for type, 3 for frac coords) silently under-weighted the type loss 16x
+        # and the coord loss 3x relative to the reference and distorted training.
         if values.numel() == 0:
             return torch.tensor(0.0, device=device, dtype=values.dtype)
-        denom = mask.sum()
-        if values.shape != mask.shape:
-            denom = denom * float(values.shape[-1])
-        return (values * mask).sum() / denom.clamp_min(1.0)
+        denom = mask.sum().clamp_min(1.0)
+        return (values * mask).sum() / denom
 
     def weight(sig: torch.Tensor, sigma_data: float):
         return (sig**2 + sigma_data**2) / (sig * sigma_data) ** 2
@@ -177,11 +181,11 @@ def compute_edm_loss(
         diff = denoised["frac"] - clean["frac_c"]
         diff = diff - torch.round(diff)  # wrap to [-0.5, 0.5]
 
-        loss_t = masked_feature_mean(weight_t * err_t, mask_exp)
+        loss_t = masked_token_reduce(weight_t * err_t, mask_exp)
 
         if coord_loss_mode == "frac_mse":
             err_f = diff**2
-            loss_f = masked_feature_mean(weight_f * err_f, mask_exp)
+            loss_f = masked_token_reduce(weight_f * err_f, mask_exp)
         elif coord_loss_mode == "cart_metric_vnorm_com":
             atom_mask = real_mask.float()
             atoms_per_sample = atom_mask.sum(dim=1).clamp_min(1.0)  # (B,)
