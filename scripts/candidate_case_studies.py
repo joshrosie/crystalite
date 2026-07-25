@@ -69,10 +69,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--min_e_above_hull",
         type=float,
-        default=-0.05,
+        default=0.0,
         help=(
-            "Exclude candidates below this eV/atom value. Strongly negative "
-            "MLIP hull distances are often suspicious for case-study examples."
+            "Exclude candidates below this eV/atom value. Use the default of "
+            "0.0 for reviewer-facing examples so strongly negative MLIP hull "
+            "artifacts are not selected."
         ),
     )
     parser.add_argument(
@@ -554,11 +555,11 @@ def write_markdown(rows: list[dict[str, Any]], path: Path) -> None:
     lines = [
         "# Crystalite Candidate Case Studies",
         "",
-        "These candidates are selected from generated CIFs by low manifest "
-        "`e_above_hull`. Values are MLIP/phase-diagram screening quantities, "
-        "not DFT-confirmed discovery claims.",
+        "These candidates are selected from generated CIFs by low nonnegative "
+        "manifest `e_above_hull`. Values are MLIP/phase-diagram screening "
+        "quantities, not DFT-confirmed discovery claims.",
         "",
-        "| sample | formula | e_hull | SG | SMACT | SM nearest | RDF nearest | CIF |",
+        "| sample | formula | e_hull | SG | SMACT | SM match | RDF nearest | CIF |",
         "|---:|---|---:|---|---|---|---|---|",
     ]
     for row in rows:
@@ -593,17 +594,40 @@ def write_markdown(rows: list[dict[str, Any]], path: Path) -> None:
                 f"- Formula: {row.get('formula')} ({row.get('reduced_formula')})",
                 f"- Sites: {row.get('num_sites')}",
                 f"- Manifest e_above_hull: {fmt(row.get('e_above_hull'))} eV/atom",
-                f"- Manifest formation energy: {fmt(row.get('e_form'))} eV/atom",
                 f"- Symmetry: {row.get('spacegroup_symbol')} "
                 f"({row.get('spacegroup_number')}), {row.get('crystal_system')}",
                 f"- SMACT validity: {row.get('smact_valid')}",
                 f"- Oxidation-state guess: {row.get('oxidation_guess_json') or 'none'}",
             ]
         )
+        if row.get("e_form") is not None:
+            lines.append(f"- Manifest formation energy: {fmt(row.get('e_form'))} eV/atom")
+        if row.get("reference_pool"):
+            lines.append(
+                f"- Reference search: pool={row.get('reference_pool')}, "
+                f"pool_size={row.get('reference_pool_size')}, "
+                f"scored={row.get('reference_scored')}"
+            )
         if row.get("sm_match_ref_id"):
             lines.append(
-                f"- StructureMatcher nearest hit: {row.get('sm_match_ref_id')} "
-                f"(split={row.get('sm_match_ref_split')}, RMS={fmt(row.get('sm_match_rms'))})"
+                f"- StructureMatcher equivalent/tolerance match: "
+                f"{row.get('sm_match_ref_id')} (split={row.get('sm_match_ref_split')}, "
+                f"RMS={fmt(row.get('sm_match_rms'))}, "
+                f"max_dist={fmt(row.get('sm_match_max_dist'))})"
+            )
+        elif row.get("reference_pool"):
+            lines.append("- StructureMatcher equivalent/tolerance match: none found")
+        if row.get("lattice_nearest_ref_id"):
+            lines.append(
+                f"- Lattice-feature nearest reference: {row.get('lattice_nearest_ref_id')} "
+                f"(split={row.get('lattice_nearest_ref_split')}, "
+                f"distance={fmt(row.get('lattice_nearest_distance'))})"
+            )
+        if row.get("rdf_nearest_ref_id"):
+            lines.append(
+                f"- RDF nearest reference: {row.get('rdf_nearest_ref_id')} "
+                f"(split={row.get('rdf_nearest_ref_split')}, "
+                f"distance={fmt(row.get('rdf_nearest_distance'))})"
             )
         if row.get("decomposition_products_json"):
             lines.append(

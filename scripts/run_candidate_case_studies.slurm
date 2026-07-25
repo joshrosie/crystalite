@@ -51,7 +51,7 @@ OUT_DIR="${OUT_DIR:-outputs/candidate_case_studies}"
 
 # ---- selection / analysis controls ----
 TOP_K="${TOP_K:-5}"
-MIN_E_ABOVE_HULL="${MIN_E_ABOVE_HULL:--0.05}"
+MIN_E_ABOVE_HULL="${MIN_E_ABOVE_HULL:-0.0}"
 MAX_E_ABOVE_HULL="${MAX_E_ABOVE_HULL:-0.1}"
 CANDIDATE_POOL_SIZE="${CANDIDATE_POOL_SIZE:-500}"
 NMAX="${NMAX:-20}"
