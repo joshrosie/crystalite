@@ -38,6 +38,34 @@ class TimeEmbedder(nn.Module):
         return self.mlp(t)
 
 
+class PropEncoder(nn.Module):
+    """Encodes a conditioning property into a ``d_model`` vector added to the
+    time embedding (the single AdaLN conditioning channel).
+
+    Discrete kind (space group): an embedding table where index 0 is the null
+    token used by classifier-free guidance and indices 1..(vocab_size-1) are the
+    class values (for space group these are the SG numbers 1..230). The table is
+    **zero-initialised** so that at construction every property (including null)
+    contributes nothing — the conditional model starts identical to the frozen
+    base and learns the conditioning signal from zero (AdaLN-Zero style).
+    """
+
+    def __init__(self, d_model: int, kind: str, vocab_size: int) -> None:
+        super().__init__()
+        self.kind = kind
+        if kind == "discrete":
+            if vocab_size <= 1:
+                raise ValueError(f"discrete PropEncoder needs vocab_size > 1, got {vocab_size}")
+            self.embed = nn.Embedding(vocab_size, d_model)
+            nn.init.zeros_(self.embed.weight)
+        else:
+            raise ValueError(f"Unsupported PropEncoder kind: {kind!r}")
+
+    def forward(self, prop: torch.Tensor) -> torch.Tensor:
+        # prop: (B,) integer class indices (0 == null token).
+        return self.embed(prop.long())
+
+
 class FourierCoordEmbedder(nn.Module):
     def __init__(
         self,

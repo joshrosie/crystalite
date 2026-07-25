@@ -17,3 +17,16 @@ DIAGNOSTIC_SECTION_KEYS = (
 
 # Backward-compatible alias for older imports during the refactor.
 _DIAGNOSTIC_SECTION_KEYS = DIAGNOSTIC_SECTION_KEYS
+
+# Conditioning property specs for controllable generation (space-group CFG via LoRA).
+# The null token index (0) is reserved for classifier-free guidance; real class
+# values occupy 1..(vocab_size-1). For space group these map 1:1 onto SG numbers 1..230.
+COND_NULL_INDEX = 0
+
+COND_PROP_SPECS = {
+    "spacegroup": {
+        "column": "spacegroup.number",
+        "kind": "discrete",
+        "vocab_size": 231,  # 0 = null token, 1..230 = space-group numbers
+    },
+}

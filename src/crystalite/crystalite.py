@@ -3,9 +3,15 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from src.models.embeddings import FourierCoordEmbedder, LatticeEmbedder, TimeEmbedder
+from src.models.embeddings import (
+    FourierCoordEmbedder,
+    LatticeEmbedder,
+    TimeEmbedder,
+    PropEncoder,
+)
 from src.models.transformer import TransformerTrunk
 from src.models.heads import CrystalHeads
+from src.models.lora import wrap_adaln_with_lora
 
 
 def mod1(x: torch.Tensor) -> torch.Tensor:
@@ -53,6 +59,10 @@ class CrystaliteModel(nn.Module):
         use_noise_gate: bool = True,
         gem_per_layer: bool = False,
         coord_head_mode: str = "direct",
+        cond_kind: str | None = None,
+        cond_vocab_size: int = 0,
+        lora_rank: int = 0,
+        lora_alpha: float = 0.0,
     ) -> None:
         super().__init__()
         self.type_dim = (vz + 1) if type_dim is None else int(type_dim)
@@ -102,6 +112,21 @@ class CrystaliteModel(nn.Module):
             coord_head_mode=coord_head_mode,
         )
 
+        # Optional property conditioning (space-group CFG via LoRA on AdaLN).
+        # When enabled, a PropEncoder injects a conditioning vector into the time
+        # embedding, and each AdaLN block's modulation Linear is wrapped with a
+        # LoRA adapter (base frozen elsewhere). Disabled => unconditional model,
+        # byte-for-byte identical to the pre-conditioning architecture.
+        self.cond_kind = cond_kind
+        self.cond_vocab_size = int(cond_vocab_size)
+        if cond_kind is not None:
+            self.prop_encoder = PropEncoder(
+                d_model=d_model, kind=cond_kind, vocab_size=self.cond_vocab_size
+            )
+            wrap_adaln_with_lora(self.trunk, rank=lora_rank, alpha=lora_alpha)
+        else:
+            self.prop_encoder = None
+
     def forward(
         self,
         type_feats: torch.Tensor,
@@ -110,6 +135,7 @@ class CrystaliteModel(nn.Module):
         pad_mask: torch.Tensor,
         t_sigma: torch.Tensor,
         lattice_bias_feats: torch.Tensor | None = None,
+        prop: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         """
         Args:
@@ -120,6 +146,8 @@ class CrystaliteModel(nn.Module):
             t_sigma: (B,) scalar noise embedding; shared for t_g/t_a.
             lattice_bias_feats: optional (B, 6) lattice features used only for
                 geometry-aware attention bias. If None, lattice_feats is used.
+            prop: optional (B,) integer conditioning indices (0 == null token).
+                Only used when the model was built with conditioning enabled.
         """
         frac_mod = mod1(frac_coords)
         h_type = self.type_proj(type_feats) + self.coord_embed(frac_mod) + self.segment_embed.weight[0]
@@ -135,6 +163,14 @@ class CrystaliteModel(nn.Module):
             dim=1,
         )
         t_emb = self.time(t_sigma, t_sigma)
+        if self.prop_encoder is not None:
+            # Inject conditioning into the single AdaLN channel. A missing prop on
+            # a conditional model falls back to the (learned) null token, index 0.
+            if prop is None:
+                prop = torch.zeros(
+                    x.shape[0], dtype=torch.long, device=x.device
+                )
+            t_emb = t_emb + self.prop_encoder(prop)
         # In the EDM codepath, t_sigma is the noise embedding c_noise = 0.25 * log(sigma).
         # GEM's noise gate expects sigma (positive, on the same scale as the Karras schedule),
         # so convert back here while keeping the time embedding on c_noise.

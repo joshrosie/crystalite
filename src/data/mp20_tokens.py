@@ -134,8 +134,17 @@ def translate_frac_coords(frac_coords, pad_mask, rng=None):
     return coords
 
 
+_COLLATE_STANDARD_KEYS = {"mp_id", "A0", "F1", "Y1", "pad_mask", "num_atoms"}
+
+
 def collate_mp20_tokens(batch):
-    """Simple collate function for MP20Tokens dataset."""
+    """Collate function for MP20Tokens.
+
+    Stacks the standard token tensors and additionally stacks any extra keys
+    carried by the dataset via ``prop_list`` (e.g. ``spacegroup.number`` for
+    conditional generation). Numeric props become tensors; anything that will
+    not tensorize cleanly is kept as a Python list.
+    """
     out = {
         "mp_id": [b["mp_id"] for b in batch],
         "A0": torch.stack([b["A0"] for b in batch], dim=0),  # (B,NMAX)
@@ -144,6 +153,15 @@ def collate_mp20_tokens(batch):
         "pad_mask": torch.stack([b["pad_mask"] for b in batch], dim=0),  # (B,NMAX)
         "num_atoms": torch.tensor([b["num_atoms"] for b in batch], dtype=torch.long),
     }
+    # Carry conditioning properties (prop_list keys) into the batch. Without this
+    # a requested property is silently dropped and conditioning becomes a no-op.
+    extra_keys = set(batch[0].keys()) - _COLLATE_STANDARD_KEYS
+    for k in sorted(extra_keys):
+        values = [b[k] for b in batch]
+        try:
+            out[k] = torch.as_tensor(values)
+        except (TypeError, ValueError):
+            out[k] = values
     return out
 
 
@@ -190,6 +208,16 @@ class MP20Tokens(Dataset):
 
         # MP20 token cache is a trusted local artifact; disable weights_only to allow full pickle.
         self.items = torch.load(self.proc_pt, weights_only=False)
+
+        # The proc_pt cache filename is not keyed on prop_list, so an existing
+        # cache built without the requested properties would silently omit them
+        # (making conditioning a no-op). Detect that and reprocess.
+        if self.prop_list and self.items:
+            missing_props = [k for k in self.prop_list if k not in self.items[0]]
+            if missing_props:
+                self._download_if_needed()
+                self._process_and_save()
+                self.items = torch.load(self.proc_pt, weights_only=False)
 
     def _download_if_needed(self):
         if os.path.exists(self.raw_csv):

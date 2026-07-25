@@ -104,6 +104,18 @@ def _build_model_from_ckpt(
         )
     type_dim = int(ckpt.get("type_dim", model_args.get("type_dim", VZ + 1)))
 
+    # Reconstruct conditioning config from the saved model_args so a conditional
+    # (space-group LoRA) checkpoint rebuilds with its PropEncoder + LoRA adapters.
+    cond_prop = str(model_args.get("cond_prop", "none"))
+    cond_kind = None
+    cond_vocab_size = 0
+    if cond_prop != "none":
+        from src.utils.constants import COND_PROP_SPECS
+
+        _spec = COND_PROP_SPECS[cond_prop]
+        cond_kind = _spec["kind"]
+        cond_vocab_size = int(_spec["vocab_size"])
+
     model = CrystaliteModel(
         d_model=int(model_args.get("d_model", 512)),
         n_heads=int(model_args.get("n_heads", 8)),
@@ -131,6 +143,10 @@ def _build_model_from_ckpt(
         dist_slope_init=float(model_args.get("dist_slope_init", -1.0)),
         use_noise_gate=bool(model_args.get("use_noise_gate", True)),
         gem_per_layer=bool(model_args.get("gem_per_layer", False)),
+        cond_kind=cond_kind,
+        cond_vocab_size=cond_vocab_size,
+        lora_rank=int(model_args.get("lora_rank", 16)),
+        lora_alpha=float(model_args.get("lora_alpha", 32.0)),
     ).to(device)
 
     model_state = ckpt.get("model_state_dict", None)
@@ -280,6 +296,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample_num_steps", type=int, default=None)
     parser.add_argument("--sample_mode", type=str, default="ema", choices=["ema", "regular"])
     parser.add_argument("--bf16", action="store_true")
+    parser.add_argument(
+        "--target_spacegroup",
+        type=int,
+        default=0,
+        help=(
+            "Target space-group number (1-230) to condition on (conditional "
+            "checkpoints only). 0 = null token / unconditional."
+        ),
+    )
+    parser.add_argument(
+        "--guidance_scale",
+        type=float,
+        default=1.0,
+        help=(
+            "Classifier-free guidance weight w: D = D_null + w*(D_cond - D_null). "
+            "w=1 pure conditional, w>1 stronger guidance, w=0 unconditional. "
+            "Ignored when --target_spacegroup=0 or the checkpoint is unconditional."
+        ),
+    )
     parser.add_argument("--nmax", type=int, default=None)
     parser.add_argument("--dataset_name", type=str, default=None)
     parser.add_argument("--data_root", type=str, default=None)
@@ -483,6 +518,8 @@ def main() -> None:
                 aa_rho_coords=aa_rho_coords,
                 aa_rho_lattice=aa_rho_lattice,
                 lattice_repr=lattice_repr,
+                target_spacegroup=int(args.target_spacegroup),
+                guidance_scale=float(args.guidance_scale),
             )
 
             pad_mask_cpu = pad_mask.to("cpu")

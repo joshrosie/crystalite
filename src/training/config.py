@@ -527,6 +527,64 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable Crystal Structure Prediction mode (fix atom types, zero type loss).",
     )
+    # Conditioning (space-group CFG via LoRA on AdaLN)
+    parser.add_argument(
+        "--cond_prop",
+        type=str,
+        default="none",
+        choices=["none", "spacegroup"],
+        help=(
+            "Conditioning property. 'none' keeps the model unconditional (default). "
+            "'spacegroup' enables space-group conditioning (LoRA on AdaLN + CFG); "
+            "requires a labelled dataset column (spacegroup.number)."
+        ),
+    )
+    parser.add_argument(
+        "--base_ckpt",
+        type=str,
+        default=None,
+        help=(
+            "Optional checkpoint to load base weights from (strict=False) before "
+            "conditioning finetune. Base weights are frozen; only the PropEncoder + "
+            "LoRA adapters train."
+        ),
+    )
+    parser.add_argument(
+        "--cond_dropout",
+        type=float,
+        default=0.15,
+        help="Probability of dropping the condition to the null token during finetune (for CFG).",
+    )
+    parser.add_argument(
+        "--lora_rank",
+        type=int,
+        default=16,
+        help="LoRA rank for the AdaLN modulation adapters (conditioning only).",
+    )
+    parser.add_argument(
+        "--lora_alpha",
+        type=float,
+        default=32.0,
+        help="LoRA alpha (scaling = alpha/rank) for the AdaLN adapters.",
+    )
+    parser.add_argument(
+        "--guidance_scale",
+        type=float,
+        default=0.0,
+        help=(
+            "Classifier-free guidance weight w used at sampling time: "
+            "D = D_null + w*(D_cond - D_null). 0 disables guidance (unconditional)."
+        ),
+    )
+    parser.add_argument(
+        "--target_spacegroup",
+        type=int,
+        default=0,
+        help=(
+            "Target space-group number (1-230) to condition on when sampling. "
+            "0 means the null token (unconditional)."
+        ),
+    )
     return parser
 
 
@@ -600,6 +658,23 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
         parser.error("--edge_bias_rbf_max must be > 0.")
     if args.dataset_name == "custom" and args.nmax is None:
         parser.error("--nmax is required when --dataset_name custom.")
+
+    # Conditioning validation
+    if not (0.0 <= args.cond_dropout <= 1.0):
+        parser.error("--cond_dropout must be in [0, 1].")
+    if args.lora_rank <= 0:
+        parser.error("--lora_rank must be a positive integer.")
+    if args.lora_alpha <= 0.0:
+        parser.error("--lora_alpha must be > 0.")
+    if args.guidance_scale < 0.0:
+        parser.error("--guidance_scale must be >= 0.")
+    if not (0 <= args.target_spacegroup <= 230):
+        parser.error("--target_spacegroup must be in [0, 230] (0 = null token).")
+    if args.cond_prop != "none" and args.csp:
+        parser.error(
+            "--cond_prop conditioning is not supported together with --csp "
+            "(CSP already conditions on composition)."
+        )
 
     dataset_default_nmax = DATASET_NMAX_DEFAULTS.get(args.dataset_name, DEFAULT_NMAX)
     nmax = int(args.nmax) if args.nmax is not None else int(dataset_default_nmax)

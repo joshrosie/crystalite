@@ -11,6 +11,51 @@ def wrap_frac(delta: torch.Tensor) -> torch.Tensor:
     return delta - torch.round(delta)
 
 
+def denoise_cfg(
+    *,
+    guidance_scale: float,
+    prop_target: torch.Tensor | None,
+    cond_null_index: int = 0,
+    **denoise_kwargs,
+) -> dict[str, torch.Tensor]:
+    """Classifier-free guidance on the EDM denoised x0 estimate.
+
+    Convention (Stable-Diffusion style)::
+
+        D = D_null + w * (D_cond - D_null)
+          w = 0 : unconditional (null token)
+          w = 1 : pure conditional (no guidance)
+          w > 1 : guidance (sharper conditioning)
+
+    Fractional coordinates live on a torus, so ``D_cond - D_null`` for ``frac`` is
+    taken with the minimum-image convention (:func:`wrap_frac`) before scaling.
+    ``prop_target=None`` (unconditional model or null target) returns a single
+    plain denoise pass; ``w == 1`` short-circuits to one conditional pass.
+    """
+
+    def run(prop):
+        return denoise_edm(prop=prop, **denoise_kwargs)
+
+    if prop_target is None:
+        return run(None)
+    if guidance_scale == 1.0:
+        return run(prop_target)
+    null = torch.full_like(prop_target, cond_null_index)
+    if guidance_scale == 0.0:
+        return run(null)
+
+    d_cond = run(prop_target)
+    d_null = run(null)
+    w = float(guidance_scale)
+    frac_delta = wrap_frac(d_cond["frac"] - d_null["frac"])
+    return {
+        "type": d_null["type"] + w * (d_cond["type"] - d_null["type"]),
+        "frac": d_null["frac"] + w * frac_delta,
+        "lat": d_null["lat"] + w * (d_cond["lat"] - d_null["lat"]),
+        "raw": d_cond.get("raw"),
+    }
+
+
 def resolve_nonnegative_scalar(
     name: str, value: float | None, default: float = 0.0
 ) -> float:
@@ -75,10 +120,26 @@ def edm_sampler(
     aa_rho_lattice: float = 0.0,
     aa_rho_types: float = 0.0,
     lattice_repr: str = "y1",
+    target_spacegroup: int = 0,
+    guidance_scale: float = 0.0,
+    cond_null_index: int = 0,
 ) -> dict[str, torch.Tensor]:
     device = pad_mask.device
     bsz, nmax = pad_mask.shape
     real_mask = ~pad_mask
+
+    # Space-group conditioning target for classifier-free guidance. Only active on
+    # a conditional model with a real target (>0); otherwise sampling is
+    # unconditional (the model falls back to the null token internally).
+    prop_target = None
+    if (
+        getattr(model, "prop_encoder", None) is not None
+        and target_spacegroup
+        and int(target_spacegroup) > 0
+    ):
+        prop_target = torch.full(
+            (bsz,), int(target_spacegroup), dtype=torch.long, device=device
+        )
 
     type_x = torch.randn((bsz, nmax, type_dim), device=device, generator=generator)
     frac_x = torch.randn(
@@ -170,7 +231,10 @@ def edm_sampler(
             type_hat = fixed_atom_types.to(dtype=type_hat.dtype)
 
         sigma_hat = torch.full((bsz,), float(t_hat), device=device)
-        denoised = denoise_edm(
+        denoised = denoise_cfg(
+            guidance_scale=guidance_scale,
+            prop_target=prop_target,
+            cond_null_index=cond_null_index,
             model=model,
             type_noisy=type_hat,
             frac_noisy=frac_hat,
@@ -219,7 +283,10 @@ def edm_sampler(
 
         if i < num_steps - 1:
             sigma_next = torch.full((bsz,), float(t_next_val), device=device)
-            denoised_next = denoise_edm(
+            denoised_next = denoise_cfg(
+                guidance_scale=guidance_scale,
+                prop_target=prop_target,
+                cond_null_index=cond_null_index,
                 model=model,
                 type_noisy=type_next,
                 frac_noisy=frac_next,

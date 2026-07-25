@@ -296,6 +296,8 @@ def generate_sampling_batch(
                 aa_rho_coords=args.aa_rho_coords,
                 aa_rho_lattice=args.aa_rho_lattice,
                 lattice_repr=args.lattice_repr,
+                target_spacegroup=getattr(args, "target_spacegroup", 0),
+                guidance_scale=getattr(args, "guidance_scale", 0.0),
             )
 
             pad_mask_cpu_chunk = pad_mask_chunk.to("cpu")
@@ -416,6 +418,8 @@ def _generate_csp_items_for_indices(
                 aa_rho_coords=args.aa_rho_coords,
                 aa_rho_lattice=args.aa_rho_lattice,
                 lattice_repr=args.lattice_repr,
+                target_spacegroup=getattr(args, "target_spacegroup", 0),
+                guidance_scale=getattr(args, "guidance_scale", 0.0),
             )
             pad_mask_cpu = pad_mask_chunk.to("cpu")
             real_mask = ~pad_mask_cpu

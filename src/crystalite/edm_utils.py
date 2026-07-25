@@ -74,6 +74,7 @@ def denoise_edm(
     sigma_max: float,
     autocast_dtype: torch.dtype | None = None,
     skip_type_scaling: bool = False,
+    prop: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """
     EDM preconditioning for all MP20 variables.
@@ -120,6 +121,7 @@ def denoise_edm(
             pad_mask,
             t_sigma,
             lattice_bias_feats=lat_noisy,
+            prop=prop,
         )
 
     type_raw = raw["type_logits"]

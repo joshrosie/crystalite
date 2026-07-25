@@ -43,7 +43,12 @@ from src.models.lattice_repr import (
 from src.utils.sample_stats import collect_structure_stats
 from src.utils.stability_logger import StabilityLogger, _ThermoConfig
 from src.utils.wandb_utils import init_wandb, log_images, log_metrics
-from src.utils.constants import DATASET_NMAX_DEFAULTS, _DIAGNOSTIC_SECTION_KEYS
+from src.utils.constants import (
+    DATASET_NMAX_DEFAULTS,
+    _DIAGNOSTIC_SECTION_KEYS,
+    COND_PROP_SPECS,
+    COND_NULL_INDEX,
+)
 from src.utils.seeding import seed_everything, seed_dataloader_worker
 from src.utils.checkpoint import (
     BestCkptState,
@@ -124,23 +129,33 @@ def main() -> None:
 
     has_split = ensure_dataset_splits(args.data_root, args.dataset_name)
 
+    # Conditioning: resolve the dataset column carrying the target property so it
+    # is preprocessed and collated into the batch. None => unconditional (unchanged).
+    cond_column = (
+        COND_PROP_SPECS[args.cond_prop]["column"] if args.cond_prop != "none" else None
+    )
+    cond_prop_list = [cond_column] if cond_column else None
+
     ds = MP20Tokens(
         root=args.data_root,
         augment_translate=True,
         split="train" if has_split else "all",
         nmax=nmax,
+        prop_list=cond_prop_list,
     )
     val_ds = MP20Tokens(
         root=args.data_root,
         augment_translate=False,
         split="val" if has_split else "all",
         nmax=nmax,
+        prop_list=cond_prop_list,
     )
     ref_ds = MP20Tokens(
         root=args.data_root,
         augment_translate=False,
         split="train" if has_split else "all",
         nmax=nmax,
+        prop_list=cond_prop_list,
     )
     train_element_dist = compute_dataset_element_distribution(ds)
     train_allowed_mask = compute_allowed_elements(ds)
@@ -198,6 +213,14 @@ def main() -> None:
     )
     type_encoding = build_type_encoding(args.type_encoding, vz=VZ)
 
+    # Resolve conditioning (space-group CFG via LoRA). None => unconditional.
+    cond_kind = None
+    cond_vocab_size = 0
+    if args.cond_prop != "none":
+        _spec = COND_PROP_SPECS[args.cond_prop]
+        cond_kind = _spec["kind"]
+        cond_vocab_size = int(_spec["vocab_size"])
+
     model = CrystaliteModel(
         d_model=args.d_model,
         n_heads=args.n_heads,
@@ -225,11 +248,58 @@ def main() -> None:
         dist_slope_init=args.dist_slope_init,
         use_noise_gate=args.use_noise_gate,
         gem_per_layer=args.gem_per_layer,
+        cond_kind=cond_kind,
+        cond_vocab_size=cond_vocab_size,
+        lora_rank=args.lora_rank,
+        lora_alpha=args.lora_alpha,
     ).to(device)
+
+    # Conditioning finetune: load frozen base weights and freeze everything except
+    # the PropEncoder + LoRA adapters. The base checkpoint predates conditioning,
+    # so its AdaLN modulation keys are remapped onto the LoRA-wrapped locations.
+    if args.base_ckpt:
+        from src.models.lora import remap_base_state_dict_for_lora
+
+        base_ck = torch.load(args.base_ckpt, map_location=device, weights_only=False)
+        if isinstance(base_ck, dict) and "model_state_dict" in base_ck:
+            base_sd = base_ck["model_state_dict"]
+        elif isinstance(base_ck, dict) and "ema_state_dict" in base_ck:
+            base_sd = base_ck["ema_state_dict"]
+        else:
+            base_sd = base_ck
+        base_sd = remap_base_state_dict_for_lora(base_sd, model)
+        missing, unexpected = model.load_state_dict(base_sd, strict=False)
+        bad_missing = [
+            k for k in missing if ("lora_" not in k and "prop_encoder" not in k)
+        ]
+        if bad_missing or unexpected:
+            raise RuntimeError(
+                "Base checkpoint load mismatch — "
+                f"unexpected={unexpected}; unexpected-missing={bad_missing}. "
+                "Check that architecture flags match the base model."
+            )
+        print(
+            f"Loaded frozen base from {args.base_ckpt} "
+            f"({len(base_sd) - len(missing)} tensors; {len(missing)} fresh cond params)"
+        )
+
+    if cond_kind is not None:
+        for name, p in model.named_parameters():
+            p.requires_grad_(("lora_" in name) or ("prop_encoder" in name))
+        n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        n_total = sum(p.numel() for p in model.parameters())
+        print(
+            f"conditioning finetune ({args.cond_prop}): "
+            f"{n_trainable}/{n_total} params trainable "
+            f"({100.0 * n_trainable / max(1, n_total):.2f}%)"
+        )
+
     num_params = sum(p.numel() for p in model.parameters())
     print(f"model parameters: {num_params}")
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+        (p for p in model.parameters() if p.requires_grad),
+        lr=args.lr,
+        weight_decay=args.weight_decay,
     )
     warmup_steps = max(0, args.lr_warmup_steps)
     max_steps = max(1, args.max_steps)
@@ -481,6 +551,18 @@ def main() -> None:
         )
         lat_noisy = lat_clean + sigma[:, None] * g_lat
 
+        # Conditioning label with CFG condition-dropout: with prob cond_dropout,
+        # replace the target with the null token so the model learns both the
+        # conditional and unconditional score.
+        prop_train = None
+        if cond_kind is not None:
+            prop_train = batch[cond_column].to(device=device, dtype=torch.long)
+            if args.cond_dropout > 0.0:
+                drop = torch.rand(prop_train.shape[0], device=device) < args.cond_dropout
+                prop_train = torch.where(
+                    drop, torch.full_like(prop_train, COND_NULL_INDEX), prop_train
+                )
+
         denoised = denoise_edm(
             model=model,
             type_noisy=type_noisy,
@@ -495,6 +577,7 @@ def main() -> None:
             sigma_max=args.sigma_max,
             autocast_dtype=bf16_dtype,
             skip_type_scaling=args.csp,
+            prop=prop_train,
         )
 
         losses = compute_edm_loss(
@@ -607,6 +690,11 @@ def main() -> None:
                         lat_clean_v
                     )
 
+                    # Conditional val loss uses the real label (no dropout).
+                    prop_v = None
+                    if cond_kind is not None:
+                        prop_v = v_batch[cond_column].to(device=device, dtype=torch.long)
+
                     denoised_v = denoise_edm(
                         model=model,
                         type_noisy=type_noisy_v,
@@ -621,6 +709,7 @@ def main() -> None:
                         sigma_max=args.sigma_max,
                         autocast_dtype=bf16_dtype,
                         skip_type_scaling=args.csp,
+                        prop=prop_v,
                     )
                     v_losses = compute_edm_loss(
                         denoised=denoised_v,
