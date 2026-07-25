@@ -51,11 +51,14 @@ OUT_DIR="${OUT_DIR:-outputs/candidate_case_studies_base_rebuttal_n2500_s150}"
 
 # ---- selection / analysis controls ----
 TOP_K="${TOP_K:-5}"
+SELECTION_MODE="${SELECTION_MODE:-msun}"
 MIN_E_ABOVE_HULL="${MIN_E_ABOVE_HULL:-0.0}"
 MAX_E_ABOVE_HULL="${MAX_E_ABOVE_HULL:-0.1}"
 CANDIDATE_POOL_SIZE="${CANDIDATE_POOL_SIZE:-500}"
 NMAX="${NMAX:-20}"
 REFERENCE_SPLITS="${REFERENCE_SPLITS:-train val test}"
+MSUN_NOVELTY_SPLITS="${MSUN_NOVELTY_SPLITS:-train}"
+MINIMUM_NARY="${MINIMUM_NARY:-1}"
 MAX_REFERENCE_CANDIDATES="${MAX_REFERENCE_CANDIDATES:-5000}"
 SYMPREC="${SYMPREC:-0.1}"
 STOL="${STOL:-0.5}"
@@ -67,7 +70,7 @@ ANGLE_TOL="${ANGLE_TOL:-10}"
 REQUIRE_REFERENCE="${REQUIRE_REFERENCE:-1}"
 REQUIRE_PHASE_DIAGRAM="${REQUIRE_PHASE_DIAGRAM:-1}"
 REQUIRE_SMACT_VALID="${REQUIRE_SMACT_VALID:-1}"
-REQUIRE_NO_SM_MATCH="${REQUIRE_NO_SM_MATCH:-1}"
+REQUIRE_NO_SM_MATCH="${REQUIRE_NO_SM_MATCH:-0}"
 
 if [[ ! -d "$CIF_DIR" ]]; then
   echo "[case-studies] CIF_DIR not found: $CIF_DIR" >&2
@@ -92,11 +95,13 @@ ARGS=(
   --cif_dir "$CIF_DIR"
   --manifest "$MANIFEST"
   --out_dir "$OUT_DIR"
+  --selection_mode "$SELECTION_MODE"
   --top_k "$TOP_K"
   --min_e_above_hull "$MIN_E_ABOVE_HULL"
   --max_e_above_hull "$MAX_E_ABOVE_HULL"
   --candidate_pool_size "$CANDIDATE_POOL_SIZE"
   --nmax "$NMAX"
+  --minimum_nary "$MINIMUM_NARY"
   --max_reference_candidates "$MAX_REFERENCE_CANDIDATES"
   --symprec "$SYMPREC"
   --stol "$STOL"
@@ -114,7 +119,13 @@ fi
 if [[ -d "$REFERENCE_DATA_ROOT" ]]; then
   # shellcheck disable=SC2206
   REFERENCE_SPLIT_ARGS=($REFERENCE_SPLITS)
-  ARGS+=(--reference_data_root "$REFERENCE_DATA_ROOT" --reference_splits "${REFERENCE_SPLIT_ARGS[@]}")
+  # shellcheck disable=SC2206
+  MSUN_NOVELTY_SPLIT_ARGS=($MSUN_NOVELTY_SPLITS)
+  ARGS+=(
+    --reference_data_root "$REFERENCE_DATA_ROOT"
+    --reference_splits "${REFERENCE_SPLIT_ARGS[@]}"
+    --msun_novelty_splits "${MSUN_NOVELTY_SPLIT_ARGS[@]}"
+  )
 else
   echo "[case-studies] reference search disabled; missing: $REFERENCE_DATA_ROOT"
 fi
@@ -130,7 +141,8 @@ echo "[case-studies] cif_dir=$CIF_DIR"
 echo "[case-studies] manifest=$MANIFEST"
 echo "[case-studies] reference_data_root=$REFERENCE_DATA_ROOT splits=$REFERENCE_SPLITS"
 echo "[case-studies] phase_diagram=$PHASE_DIAGRAM"
-echo "[case-studies] out_dir=$OUT_DIR top_k=$TOP_K hull_window=[$MIN_E_ABOVE_HULL,$MAX_E_ABOVE_HULL]"
+echo "[case-studies] out_dir=$OUT_DIR top_k=$TOP_K selection_mode=$SELECTION_MODE hull_window=[$MIN_E_ABOVE_HULL,$MAX_E_ABOVE_HULL]"
+echo "[case-studies] msun_novelty_splits=$MSUN_NOVELTY_SPLITS minimum_nary=$MINIMUM_NARY"
 
 srun uv run python scripts/candidate_case_studies.py "${ARGS[@]}"
 

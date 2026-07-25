@@ -20,6 +20,7 @@ import math
 import pickle
 import shutil
 import sys
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,13 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.data.mp20_tokens import MP20Tokens, tokens_to_structure  # noqa: E402
 from src.eval.crystal import smact_validity  # noqa: E402
+from src.eval.uniqueness_novelty import (  # noqa: E402
+    _build_composition_index,
+    _filter_by_nary,
+    _get_composition_hash,
+    _is_finite_structure,
+    _structures_match,
+)
 
 
 @dataclass
@@ -49,6 +57,14 @@ class ReferenceRecord:
     volume_per_atom: float
 
 
+@dataclass
+class GeneratedRecord:
+    row: dict[str, Any]
+    sample_idx: int
+    cif_path: Path
+    structure: Structure
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -59,6 +75,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cif_dir", required=True, type=Path)
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--out_dir", required=True, type=Path)
+    parser.add_argument(
+        "--selection_mode",
+        choices=("low_hull", "msun"),
+        default="low_hull",
+        help=(
+            "low_hull selects by manifest e_above_hull only. msun first computes "
+            "the official StructureMatcher-style unique+novel flags over the "
+            "generated export and then selects metastable UN candidates."
+        ),
+    )
     parser.add_argument("--top_k", type=int, default=5)
     parser.add_argument(
         "--max_e_above_hull",
@@ -105,7 +131,16 @@ def parse_args() -> argparse.Namespace:
         "--reference_splits",
         nargs="+",
         default=["train"],
-        help="MP20 splits to search when --reference_data_root is provided.",
+        help="MP20 splits to search for nearest-reference case-study audit.",
+    )
+    parser.add_argument(
+        "--msun_novelty_splits",
+        nargs="+",
+        default=["train"],
+        help=(
+            "Reference splits used to define novelty for --selection_mode msun. "
+            "Use train to match the reported DNG novelty/MSUN metric."
+        ),
     )
     parser.add_argument("--nmax", type=int, default=20)
     parser.add_argument(
@@ -117,6 +152,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stol", type=float, default=0.5)
     parser.add_argument("--ltol", type=float, default=0.3)
     parser.add_argument("--angle_tol", type=float, default=10.0)
+    parser.add_argument(
+        "--minimum_nary",
+        type=int,
+        default=1,
+        help="Minimum number of distinct elements for UN/MSUN filtering.",
+    )
     parser.add_argument("--symprec", type=float, default=0.1)
     parser.add_argument(
         "--max_reference_candidates",
@@ -180,16 +221,36 @@ def select_candidates(
     top_k: int,
     min_e_above_hull: float,
     max_e_above_hull: float,
+    msun_flags_by_sample: dict[int, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    usable = [
-        row
-        for row in rows
-        if row_success(row)
-        and (e_hull := finite_float(row.get("e_above_hull"))) is not None
-        and min_e_above_hull <= e_hull <= max_e_above_hull
-    ]
+    usable = []
+    for row in rows:
+        if not row_success(row):
+            continue
+        e_hull = finite_float(row.get("e_above_hull"))
+        if e_hull is None or not (min_e_above_hull <= e_hull <= max_e_above_hull):
+            continue
+        if msun_flags_by_sample is not None:
+            sample_idx = sample_idx_for_row(row, fallback=-1)
+            flags = msun_flags_by_sample.get(sample_idx)
+            if not flags or not flags.get("is_msun"):
+                continue
+        usable.append(row)
     usable.sort(key=lambda r: finite_float(r.get("e_above_hull")) or float("inf"))
     return usable[:top_k]
+
+
+def sample_idx_for_row(row: dict[str, Any], *, fallback: int) -> int:
+    if row.get("sample_idx") is not None:
+        return int(row["sample_idx"])
+    file_name = str(row.get("file") or "")
+    stem = Path(file_name).stem
+    if stem.startswith("sample_"):
+        try:
+            return int(stem.split("_", 1)[1])
+        except ValueError:
+            pass
+    return int(fallback)
 
 
 def load_structure_for_row(cif_dir: Path, row: dict[str, Any]) -> Structure:
@@ -201,6 +262,174 @@ def load_structure_for_row(cif_dir: Path, row: dict[str, Any]) -> Structure:
     if not path.exists():
         raise FileNotFoundError(f"Missing CIF for sample {row.get('sample_idx')}: {path}")
     return Structure.from_file(str(path))
+
+
+def load_generated_records(
+    cif_dir: Path,
+    rows: list[dict[str, Any]],
+) -> list[GeneratedRecord]:
+    records: list[GeneratedRecord] = []
+    for fallback_idx, row in enumerate(rows):
+        if not row_success(row):
+            continue
+        try:
+            sample_idx = sample_idx_for_row(row, fallback=fallback_idx)
+            file_name = row.get("file") or f"sample_{sample_idx:05d}.cif"
+            cif_path = cif_dir / str(file_name)
+            structure = Structure.from_file(str(cif_path))
+        except Exception:
+            continue
+        records.append(
+            GeneratedRecord(
+                row=row,
+                sample_idx=sample_idx,
+                cif_path=cif_path,
+                structure=structure,
+            )
+        )
+    return records
+
+
+def compute_msun_flags(
+    generated: list[GeneratedRecord],
+    novelty_refs: list[ReferenceRecord],
+    *,
+    matcher: StructureMatcher,
+    minimum_nary: int,
+    max_e_above_hull: float,
+) -> tuple[dict[int, dict[str, Any]], dict[str, Any]]:
+    """Compute per-sample MSUN membership using the eval UN matching logic.
+
+    This mirrors ``src.eval.uniqueness_novelty.compute_uniqueness_novelty`` but
+    keeps the manifest sample index so case studies can be selected from the
+    exact unique+novel+metastable subset.
+    """
+
+    finite_generated = [
+        rec for rec in generated if _is_finite_structure(rec.structure)
+    ]
+    finite_structures = [rec.structure for rec in finite_generated]
+    raw_gen_items = _filter_by_nary(
+        finite_structures,
+        minimum_nary=minimum_nary,
+    )
+    gen_items = [
+        (finite_generated[pos], struct, chemsys)
+        for pos, struct, chemsys in raw_gen_items
+    ]
+
+    flags: dict[int, dict[str, Any]] = {}
+    if not gen_items:
+        return flags, {
+            "mode": "msun",
+            "total": 0,
+            "unique": 0,
+            "novel": 0,
+            "unique_and_novel": 0,
+            "msun": 0,
+        }
+
+    finite_ref_structures = [
+        ref.structure for ref in novelty_refs if _is_finite_structure(ref.structure)
+    ]
+    raw_train_items = _filter_by_nary(
+        finite_ref_structures,
+        minimum_nary=minimum_nary,
+    )
+    train_items = list(raw_train_items)
+
+    n = len(gen_items)
+    uniq_adj: dict[int, list[int]] = defaultdict(list)
+    comp_buckets: dict[Any, list[int]] = defaultdict(list)
+    fallback_indices: list[int] = []
+    for i, (rec, _, _) in enumerate(gen_items):
+        key = _get_composition_hash(rec.structure, matcher)
+        if key is None:
+            fallback_indices.append(i)
+        else:
+            comp_buckets[key].append(i)
+
+    all_buckets = list(comp_buckets.values())
+    if fallback_indices:
+        all_buckets.append(fallback_indices)
+    for bucket in all_buckets:
+        for a in range(len(bucket)):
+            i = bucket[a]
+            _, struct_i, _ = gen_items[i]
+            for b in range(a + 1, len(bucket)):
+                j = bucket[b]
+                _, struct_j, _ = gen_items[j]
+                if _structures_match(struct_i, struct_j, matcher):
+                    uniq_adj[i].append(j)
+                    uniq_adj[j].append(i)
+
+    dupes: set[int] = set()
+    for i in range(n):
+        if i not in dupes:
+            for j in uniq_adj.get(i, []):
+                dupes.add(j)
+    is_unique = {i: i not in dupes for i in range(n)}
+
+    is_novel = {i: False for i in range(n)}
+    novel_candidates: set[int] = set()
+    if train_items:
+        gen_chemsys = {chemsys for _, _, chemsys in gen_items}
+        train_chemsys = {chemsys for _, _, chemsys in train_items}
+        intersection = gen_chemsys.intersection(train_chemsys)
+        train_filtered = [
+            struct for _, struct, chemsys in train_items if chemsys in intersection
+        ]
+        comp_index, comp_fallback = _build_composition_index(train_filtered, matcher)
+
+        for i, (_, struct, chemsys) in enumerate(gen_items):
+            if chemsys not in intersection:
+                is_novel[i] = True
+                novel_candidates.add(i)
+                continue
+            novel_candidates.add(i)
+            key = _get_composition_hash(struct, matcher)
+            if key is None:
+                candidates = train_filtered
+            else:
+                candidates = comp_index.get(key, []) + comp_fallback
+                if not candidates:
+                    is_novel[i] = True
+                    continue
+            is_novel[i] = not any(
+                _structures_match(struct, other, matcher) for other in candidates
+            )
+
+    novel_dupes: set[int] = set()
+    is_un: dict[int, bool] = {}
+    for i in range(n):
+        if not is_novel[i] or i in novel_dupes:
+            is_un[i] = False
+        else:
+            is_un[i] = True
+            for j in uniq_adj.get(i, []):
+                novel_dupes.add(j)
+
+    for i, (rec, _, _) in enumerate(gen_items):
+        e_hull = finite_float(rec.row.get("e_above_hull"))
+        is_metastable = e_hull is not None and e_hull <= max_e_above_hull
+        flags[rec.sample_idx] = {
+            "is_unique": bool(is_unique[i]),
+            "is_novel": bool(is_novel[i]),
+            "is_un": bool(is_un[i]),
+            "is_metastable": bool(is_metastable),
+            "is_msun": bool(is_un[i] and is_metastable),
+        }
+
+    summary = {
+        "mode": "msun",
+        "total": n,
+        "unique": int(sum(is_unique.values())),
+        "novel": int(sum(is_novel.values())),
+        "unique_and_novel": int(sum(is_un.values())),
+        "msun": int(sum(v["is_msun"] for v in flags.values())),
+        "novel_total": len(novel_candidates),
+    }
+    return flags, summary
 
 
 def chemsys(structure: Structure) -> tuple[str, ...]:
@@ -567,8 +796,8 @@ def write_markdown(rows: list[dict[str, Any]], path: Path) -> None:
         "manifest `e_above_hull`. Values are MLIP/phase-diagram screening "
         "quantities, not DFT-confirmed discovery claims.",
         "",
-        "| sample | formula | e_hull | SG | SMACT | SM match | RDF nearest | CIF |",
-        "|---:|---|---:|---|---|---|---|---|",
+        "| sample | formula | e_hull | SG | SMACT | UN | MSUN | SM match | RDF nearest | CIF |",
+        "|---:|---|---:|---|---|---|---|---|---|---|",
     ]
     for row in rows:
         sg = ""
@@ -581,12 +810,14 @@ def write_markdown(rows: list[dict[str, Any]], path: Path) -> None:
         if row.get("rdf_nearest_distance") is not None:
             rdf = f"{rdf}, d={fmt(row.get('rdf_nearest_distance'))}"
         lines.append(
-            "| {sample_idx} | {formula} | {ehull} | {sg} | {smact} | {sm} | {rdf} | {cif} |".format(
+            "| {sample_idx} | {formula} | {ehull} | {sg} | {smact} | {un} | {msun} | {sm} | {rdf} | {cif} |".format(
                 sample_idx=row.get("sample_idx", ""),
                 formula=row.get("reduced_formula") or row.get("formula", ""),
                 ehull=fmt(row.get("e_above_hull")),
                 sg=sg,
                 smact=row.get("smact_valid", ""),
+                un=row.get("is_un", ""),
+                msun=row.get("is_msun", ""),
                 sm=sm,
                 rdf=rdf,
                 cif=row.get("copied_cif", row.get("cif_path", "")),
@@ -608,6 +839,15 @@ def write_markdown(rows: list[dict[str, Any]], path: Path) -> None:
                 f"- Oxidation-state guess: {row.get('oxidation_guess_json') or 'none'}",
             ]
         )
+        if row.get("selection_mode") == "msun":
+            lines.extend(
+                [
+                    f"- Unique under generated-set StructureMatcher dedup: {row.get('is_unique')}",
+                    f"- Novel under MSUN reference split(s): {row.get('is_novel')}",
+                    f"- Unique+novel (UN): {row.get('is_un')}",
+                    f"- MSUN membership: {row.get('is_msun')}",
+                ]
+            )
         if row.get("e_form") is not None:
             lines.append(f"- Manifest formation energy: {fmt(row.get('e_form'))} eV/atom")
         if row.get("reference_pool"):
@@ -654,15 +894,6 @@ def main() -> int:
     selected_cif_dir.mkdir(parents=True, exist_ok=True)
 
     manifest_rows = load_manifest(args.manifest)
-    candidates = select_candidates(
-        manifest_rows,
-        top_k=max(int(args.top_k), int(args.candidate_pool_size)),
-        min_e_above_hull=float(args.min_e_above_hull),
-        max_e_above_hull=float(args.max_e_above_hull),
-    )
-    if not candidates:
-        raise SystemExit("No successful candidates found within the e_above_hull window.")
-
     refs = load_reference_records(
         args.reference_data_root,
         splits=list(args.reference_splits),
@@ -677,9 +908,44 @@ def main() -> int:
     )
     phase_diagram = load_phase_diagram(args.phase_diagram)
 
+    msun_flags_by_sample: dict[int, dict[str, Any]] | None = None
+    msun_summary: dict[str, Any] | None = None
+    if args.selection_mode == "msun":
+        requested_splits = set(args.msun_novelty_splits)
+        novelty_refs = [ref for ref in refs if ref.split in requested_splits]
+        missing_splits = requested_splits.difference({ref.split for ref in refs})
+        if missing_splits:
+            raise SystemExit(
+                "MSUN novelty splits were not loaded in --reference_splits: "
+                f"{sorted(missing_splits)}"
+            )
+        if not novelty_refs:
+            raise SystemExit(
+                "--selection_mode msun requires reference structures for novelty."
+            )
+        generated = load_generated_records(args.cif_dir, manifest_rows)
+        msun_flags_by_sample, msun_summary = compute_msun_flags(
+            generated,
+            novelty_refs,
+            matcher=matcher,
+            minimum_nary=int(args.minimum_nary),
+            max_e_above_hull=float(args.max_e_above_hull),
+        )
+        print(f"[case-studies] msun_summary={json.dumps(msun_summary, sort_keys=True)}")
+
+    candidates = select_candidates(
+        manifest_rows,
+        top_k=max(int(args.top_k), int(args.candidate_pool_size)),
+        min_e_above_hull=float(args.min_e_above_hull),
+        max_e_above_hull=float(args.max_e_above_hull),
+        msun_flags_by_sample=msun_flags_by_sample,
+    )
+    if not candidates:
+        raise SystemExit("No successful candidates found within the selected e_above_hull/MSUN window.")
+
     output_rows: list[dict[str, Any]] = []
     for row in candidates:
-        sample_idx = int(row.get("sample_idx", len(output_rows)))
+        sample_idx = sample_idx_for_row(row, fallback=len(output_rows))
         structure = load_structure_for_row(args.cif_dir, row)
         file_name = row.get("file") or f"sample_{sample_idx:05d}.cif"
         cif_path = args.cif_dir / str(file_name)
@@ -699,7 +965,10 @@ def main() -> int:
             "e_total": finite_float(row.get("e_total")),
             "nsteps": row.get("nsteps", row.get("relax_nsteps")),
             "manifest_formula": row.get("relaxed_formula") or row.get("formula"),
+            "selection_mode": args.selection_mode,
         }
+        if msun_flags_by_sample is not None:
+            result.update(msun_flags_by_sample.get(sample_idx, {}))
         result.update(structure_basic_summary(structure))
         result.update(symmetry_summary(structure, symprec=float(args.symprec)))
         result.update(oxidation)
