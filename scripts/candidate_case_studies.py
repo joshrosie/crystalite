@@ -88,6 +88,14 @@ def parse_args() -> argparse.Namespace:
         help="Only keep candidates passing the repo's SMACT-style plausibility check.",
     )
     parser.add_argument(
+        "--require_no_sm_match",
+        action="store_true",
+        help=(
+            "Only keep candidates without a StructureMatcher equivalent/tolerance "
+            "match in the searched reference splits."
+        ),
+    )
+    parser.add_argument(
         "--reference_data_root",
         type=Path,
         default=None,
@@ -707,6 +715,8 @@ def main() -> int:
                 rdf_bins=int(args.rdf_bins),
             )
         )
+        if bool(args.require_no_sm_match) and result.get("sm_match_ref_id"):
+            continue
         result.update(
             decomposition_summary(
                 phase_diagram,
