@@ -685,9 +685,11 @@ def main() -> int:
             "cif_path": str(cif_path),
             "success": row_success(row),
             "e_above_hull": finite_float(row.get("e_above_hull")),
-            "e_form": finite_float(row.get("e_form")),
+            "e_form": finite_float(
+                row.get("e_form", row.get("formation_energy_per_atom"))
+            ),
             "e_total": finite_float(row.get("e_total")),
-            "nsteps": row.get("nsteps"),
+            "nsteps": row.get("nsteps", row.get("relax_nsteps")),
             "manifest_formula": row.get("relaxed_formula") or row.get("formula"),
         }
         result.update(structure_basic_summary(structure))
