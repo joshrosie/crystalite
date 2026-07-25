@@ -33,6 +33,7 @@ module load CUDA/12.6.0
 export PATH="$HOME/.local/bin:$PATH"
 
 PROJECT_ROOT="${PROJECT_ROOT:-$HOME/crystalite}"
+CRYSFINITY_ROOT="${CRYSFINITY_ROOT:-$HOME/crysfinity}"
 cd "$PROJECT_ROOT"
 
 export UV_CACHE_DIR="${TMPDIR:-/tmp/$USER/uv-cache-${SLURM_JOB_ID:-manual}}"
@@ -40,7 +41,7 @@ mkdir -p "$UV_CACHE_DIR"
 
 CHECKPOINT="${CHECKPOINT:?Set CHECKPOINT to a conditional (space-group) checkpoint}"
 OUT_DIR="${OUT_DIR:-results/sg_sweep}"
-DATA_ROOT="${DATA_ROOT:-data/mp20}"
+DATA_ROOT="${DATA_ROOT:-$CRYSFINITY_ROOT/data/mp20}"
 DATASET_NAME="${DATASET_NAME:-mp20}"
 NMAX="${NMAX:-20}"
 
@@ -59,6 +60,7 @@ HEADLINE_SYMPREC="${HEADLINE_SYMPREC:-0.1}"
 mkdir -p "$OUT_DIR"
 
 echo "[sg-sweep] checkpoint=$CHECKPOINT out_dir=$OUT_DIR"
+echo "[sg-sweep] project_root=$PROJECT_ROOT crysfinity_root=$CRYSFINITY_ROOT data_root=$DATA_ROOT"
 echo "[sg-sweep] targets=[$TARGETS] guidance=[$GUIDANCE_SCALES] n/cell=$NUM_SAMPLES"
 
 srun uv run python src/eval/sg_guidance_sweep.py \

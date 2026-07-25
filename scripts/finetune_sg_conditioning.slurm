@@ -38,19 +38,20 @@ module load CUDA/12.6.0
 export PATH="$HOME/.local/bin:$PATH"
 
 PROJECT_ROOT="${PROJECT_ROOT:-$HOME/crystalite}"
+CRYSFINITY_ROOT="${CRYSFINITY_ROOT:-$HOME/crysfinity}"
 cd "$PROJECT_ROOT"
 
 export UV_CACHE_DIR="${TMPDIR:-/tmp/$USER/uv-cache-${SLURM_JOB_ID:-manual}}"
 mkdir -p "$UV_CACHE_DIR"
 
 # ---- data ----
-DATA_ROOT="${DATA_ROOT:-data/mp20}"
+DATA_ROOT="${DATA_ROOT:-$CRYSFINITY_ROOT/data/mp20}"
 DATASET_NAME="${DATASET_NAME:-mp20}"
 NMAX="${NMAX:-20}"
 
 # ---- conditioning ----
 COND_PROP="${COND_PROP:-spacegroup}"
-BASE_CKPT="${BASE_CKPT:-dng_clean.pt}"
+BASE_CKPT="${BASE_CKPT:-$CRYSFINITY_ROOT/dng_clean.pt}"
 LORA_RANK="${LORA_RANK:-16}"
 LORA_ALPHA="${LORA_ALPHA:-32}"
 COND_DROPOUT="${COND_DROPOUT:-0.15}"
@@ -123,7 +124,7 @@ if [[ "${NO_WANDB:-0}" == "1" ]]; then
   WANDB_ARGS=(--no_wandb)
 fi
 
-echo "[sg-cond] project_root=$PROJECT_ROOT data_root=$DATA_ROOT"
+echo "[sg-cond] project_root=$PROJECT_ROOT crysfinity_root=$CRYSFINITY_ROOT data_root=$DATA_ROOT"
 echo "[sg-cond] cond_prop=$COND_PROP base_ckpt=$BASE_CKPT lora_rank=$LORA_RANK alpha=$LORA_ALPHA dropout=$COND_DROPOUT"
 echo "[sg-cond] output_dir=$OUT_DIR max_steps=$MAX_STEPS batch_size=$BATCH_SIZE seed=$SEED"
 

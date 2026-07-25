@@ -121,6 +121,12 @@ sbatch --export=ALL,CHECKPOINT=outputs/sg_cond/checkpoints/best.pt,OUT_DIR=resul
   scripts/sg_guidance_sweep.slurm
 ```
 
+On Snellius the scripts default to running code from `$HOME/crystalite` while
+reading shared assets from `$HOME/crysfinity`: `DATA_ROOT=$HOME/crysfinity/data/mp20`
+and `BASE_CKPT=$HOME/crysfinity/dng_clean.pt`. Override `PROJECT_ROOT`,
+`CRYSFINITY_ROOT`, `DATA_ROOT`, or `BASE_CKPT` in `--export` if the server layout
+changes.
+
 The sweep writes `sweep.csv`, `summary.json`, and `match_rate_vs_w.png` to
 `OUT_DIR`. The headline result is match-rate at `symprec 0.1`, `w=2` — the number
 directly comparable to MatterGen.
