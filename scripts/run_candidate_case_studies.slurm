@@ -17,10 +17,10 @@
 # Submit example:
 #   sbatch --export=ALL,\
 # PROJECT_ROOT=$HOME/crystalite,\
-# CIF_DIR=$HOME/crysfinity/data/export/crystalite_m1_lossfix_s150/cifs,\
+# CIF_DIR=$HOME/crysfinity/data/export/crystalite_base_rebuttal_n2500_s150/cifs,\
 # REFERENCE_DATA_ROOT=$HOME/crysfinity/data/mp20,\
 # PHASE_DIAGRAM=$HOME/crysfinity/mp_02072023/2023-02-07-ppd-mp.pkl,\
-# OUT_DIR=outputs/candidate_case_studies \
+# OUT_DIR=outputs/candidate_case_studies_base_rebuttal_n2500_s150 \
 #     scripts/run_candidate_case_studies.slurm
 #
 # If the server paths differ, override CIF_DIR, MANIFEST, REFERENCE_DATA_ROOT,
@@ -43,11 +43,11 @@ export UV_CACHE_DIR="${TMPDIR:-/tmp/$USER/uv-cache-${SLURM_JOB_ID:-manual}}"
 mkdir -p "$UV_CACHE_DIR"
 
 # ---- inputs ----
-CIF_DIR="${CIF_DIR:-$HOME/crysfinity/data/export/crystalite_m1_lossfix_s150/cifs}"
+CIF_DIR="${CIF_DIR:-$HOME/crysfinity/data/export/crystalite_base_rebuttal_n2500_s150/cifs}"
 MANIFEST="${MANIFEST:-$CIF_DIR/manifest.json}"
 REFERENCE_DATA_ROOT="${REFERENCE_DATA_ROOT:-$HOME/crysfinity/data/mp20}"
 PHASE_DIAGRAM="${PHASE_DIAGRAM:-$HOME/crysfinity/mp_02072023/2023-02-07-ppd-mp.pkl}"
-OUT_DIR="${OUT_DIR:-outputs/candidate_case_studies}"
+OUT_DIR="${OUT_DIR:-outputs/candidate_case_studies_base_rebuttal_n2500_s150}"
 
 # ---- selection / analysis controls ----
 TOP_K="${TOP_K:-5}"
