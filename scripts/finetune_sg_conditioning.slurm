@@ -51,7 +51,20 @@ NMAX="${NMAX:-20}"
 
 # ---- conditioning ----
 COND_PROP="${COND_PROP:-spacegroup}"
-BASE_CKPT="${BASE_CKPT:-$CRYSFINITY_ROOT/dng_clean.pt}"
+BASE_CKPT="${BASE_CKPT:-}"
+if [[ -z "$BASE_CKPT" ]]; then
+  if [[ -f "$CRYSFINITY_ROOT/dng_clean.pt" ]]; then
+    BASE_CKPT="$CRYSFINITY_ROOT/dng_clean.pt"
+  elif [[ -f "$CRYSFINITY_ROOT/dng.pt" ]]; then
+    BASE_CKPT="$CRYSFINITY_ROOT/dng.pt"
+  else
+    if [[ -f "$PROJECT_ROOT/dng_clean.pt" ]]; then
+      BASE_CKPT="$PROJECT_ROOT/dng_clean.pt"
+    else
+      BASE_CKPT="$PROJECT_ROOT/dng.pt"
+    fi
+  fi
+fi
 LORA_RANK="${LORA_RANK:-16}"
 LORA_ALPHA="${LORA_ALPHA:-32}"
 COND_DROPOUT="${COND_DROPOUT:-0.15}"

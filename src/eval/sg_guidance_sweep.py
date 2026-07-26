@@ -4,9 +4,10 @@
 Loads a *conditional* (space-group LoRA) checkpoint once, then for each target
 space group and each classifier-free-guidance weight ``w`` generates ``N``
 crystals and measures the exact space-group match-rate (pymatgen
-``SpacegroupAnalyzer``) against the target. Reports match-rate vs. ``w`` at a
-sweep of ``symprec`` tolerances, plus the **lift over the unconditional base
-rate** (the fraction of *unconditioned* samples that land in the target SG).
+``SpacegroupAnalyzer``) against the target after MLIP relaxation. Reports
+match-rate vs. ``w`` at a sweep of ``symprec`` tolerances, plus the **lift over
+the unconditional base rate** (the fraction of *unconditioned* samples that land
+in the target SG).
 
 Protocol defaults follow the crystal-generation literature so the headline
 number is directly comparable:
@@ -28,6 +29,7 @@ import sys
 from pathlib import Path
 
 import torch
+from tqdm import tqdm
 
 # Ensure repository root is on PYTHONPATH when run as a script (src/eval/<this>).
 ROOT = Path(__file__).resolve().parents[2]
@@ -57,6 +59,11 @@ from src.sample_crystalite_ckpt import (
     _sample_num_atoms,
     _prepare_dataset_context,
     _parse_allowed_elements,
+)
+from src.utils.sample_stats import (
+    make_chgnet_and_relaxer,
+    make_nequip_batch_relaxer,
+    make_nequip_relaxer,
 )
 
 # The 10 most common space groups in MP-20 (SymmCD "10 SGs" evaluation set).
@@ -198,6 +205,137 @@ def _match_stats(computed_by_symprec, target, n, symprecs):
     return out
 
 
+def _build_relaxer(args):
+    mlip = str(args.relax_mlip).strip().lower()
+    if mlip == "none":
+        return None, {
+            "mlip": "none",
+            "steps": 0,
+            "mode": "none",
+        }
+
+    if mlip == "chgnet":
+        _, relaxer, device = make_chgnet_and_relaxer(args.relax_device)
+        return relaxer, {
+            "mlip": "chgnet",
+            "device": device,
+            "steps": int(args.relax_steps),
+            "batch_size": int(args.relax_batch_size),
+            "mode": "sequential",
+        }
+
+    if mlip == "nequip":
+        mode = str(args.nequip_relax_mode).strip().lower()
+        if mode == "batch":
+            _, relaxer, device, model_path = make_nequip_batch_relaxer(
+                compile_path=args.nequip_compile_path,
+                stability_device=args.relax_device,
+                optimizer_name=args.nequip_optimizer,
+                cell_filter=args.nequip_cell_filter,
+                max_force_abort=args.nequip_max_force_abort,
+            )
+        else:
+            _, relaxer, device, model_path = make_nequip_relaxer(
+                compile_path=args.nequip_compile_path,
+                stability_device=args.relax_device,
+                optimizer_name=args.nequip_optimizer,
+                cell_filter=args.nequip_cell_filter,
+                fmax=args.nequip_fmax,
+                max_force_abort=args.nequip_max_force_abort,
+            )
+        return relaxer, {
+            "mlip": "nequip",
+            "device": device,
+            "steps": int(args.relax_steps),
+            "batch_size": int(args.relax_batch_size),
+            "mode": mode,
+            "compile_path": str(args.nequip_compile_path),
+            "resolved_model": str(model_path),
+            "optimizer": str(args.nequip_optimizer),
+            "cell_filter": str(args.nequip_cell_filter),
+            "fmax": float(args.nequip_fmax),
+            "max_force_abort": float(args.nequip_max_force_abort),
+        }
+
+    raise ValueError(f"Unsupported relaxation backend: {args.relax_mlip!r}")
+
+
+def _relax_structures(structures, relaxer, args, *, label: str):
+    if relaxer is None:
+        return list(structures), 0
+
+    all_structures = list(structures)
+    if not all_structures:
+        return [], 0
+
+    steps = int(args.relax_steps)
+    batch_size = max(1, int(args.relax_batch_size))
+    relaxed = []
+    n_failed = 0
+    failure_examples: list[str] = []
+    use_batched = hasattr(relaxer, "relax_many") and str(args.nequip_relax_mode) == "batch"
+
+    def record_failure(exc: Exception):
+        nonlocal n_failed
+        n_failed += 1
+        if len(failure_examples) < 3:
+            failure_examples.append(f"{exc.__class__.__name__}: {exc}")
+
+    def relax_one(struct):
+        try:
+            result = relaxer.relax(struct, steps=steps, verbose=False)
+            relaxed.append(result["final_structure"])
+        except Exception as exc:
+            record_failure(exc)
+
+    def relax_many(batch):
+        if not batch:
+            return
+        try:
+            results = relaxer.relax_many(batch, steps=steps, verbose=False)
+            if len(results) != len(batch):
+                raise RuntimeError(
+                    "Relaxer returned a mismatched number of structures: "
+                    f"{len(results)} for batch of {len(batch)}"
+                )
+            relaxed.extend(result["final_structure"] for result in results)
+        except Exception as exc:
+            if len(batch) <= 1:
+                record_failure(exc)
+                return
+            mid = len(batch) // 2
+            relax_many(batch[:mid])
+            relax_many(batch[mid:])
+
+    iterator = range(0, len(all_structures), batch_size)
+    for start in tqdm(iterator, desc=f"{label}/relax", dynamic_ncols=True):
+        batch = all_structures[start : start + batch_size]
+        if use_batched:
+            relax_many(batch)
+        else:
+            for struct in batch:
+                relax_one(struct)
+
+    msg = (
+        f"[sweep] {label}: relaxed {len(relaxed)}/{len(all_structures)} "
+        f"structures; relax_failed={n_failed}"
+    )
+    if failure_examples:
+        msg += f"; first_failure={failure_examples[0]}"
+    print(msg)
+    return relaxed, n_failed
+
+
+def _prepare_structures(sample_batch, relaxer, args, *, label: str):
+    raw_structs, n_decode_failed = structures_from_sample_batch(sample_batch)
+    final_structs, n_relax_failed = _relax_structures(raw_structs, relaxer, args, label=label)
+    return final_structs, {
+        "n_decode_failed": n_decode_failed,
+        "n_relax_failed": n_relax_failed,
+        "n_failed": n_decode_failed + n_relax_failed,
+    }
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--checkpoint", type=str, required=True,
@@ -223,6 +361,22 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--guidance_scales", type=float, nargs="+", default=DEFAULT_WEIGHTS)
     p.add_argument("--symprecs", type=float, nargs="+", default=list(DEFAULT_SYMPREC))
     p.add_argument("--headline_symprec", type=float, default=HEADLINE_SYMPREC)
+    p.add_argument("--relax_mlip", type=str, default="nequip",
+                   choices=["none", "chgnet", "nequip"],
+                   help="Relax generated structures before SG analysis.")
+    p.add_argument("--relax_steps", type=int, default=200)
+    p.add_argument("--relax_batch_size", type=int, default=64)
+    p.add_argument("--relax_device", type=str, default="cuda")
+    p.add_argument("--nequip_compile_path", type=str,
+                   default="data/mlip/nequip/*.nequip.pt2")
+    p.add_argument("--nequip_relax_mode", type=str, default="batch",
+                   choices=["sequential", "batch"])
+    p.add_argument("--nequip_optimizer", type=str, default="FIRE",
+                   choices=["FIRE", "LBFGS", "BFGS", "BFGSLineSearch", "LBFGSLineSearch"])
+    p.add_argument("--nequip_cell_filter", type=str, default="frechet",
+                   choices=["none", "frechet", "exp"])
+    p.add_argument("--nequip_fmax", type=float, default=0.005)
+    p.add_argument("--nequip_max_force_abort", type=float, default=1000000.0)
     return p.parse_args()
 
 
@@ -292,6 +446,8 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     symprecs = sorted(args.symprecs)
     weights = sorted(args.guidance_scales)
+    relaxer, relaxation_meta = _build_relaxer(args)
+    print(f"[sweep] relaxation={json.dumps(relaxation_meta, sort_keys=True)}")
 
     def gen(target_sg, w, seed):
         return _generate_pool(
@@ -306,20 +462,27 @@ def main() -> int:
     # histogram gives the base rate for every target.
     print(f"[sweep] generating unconditional base pool (n={args.num_samples})")
     base_batch = gen(target_sg=0, w=0.0, seed=args.sample_seed)
-    base_structs, base_failed = structures_from_sample_batch(base_batch)
+    base_structs, base_failures = _prepare_structures(
+        base_batch, relaxer, args, label="base"
+    )
     base_sgs = {sp: compute_space_groups(base_structs, sp) for sp in symprecs}
-    print(f"[sweep] base pool: {len(base_structs)} valid, {base_failed} failed")
+    print(
+        f"[sweep] base pool: {len(base_structs)} structures, "
+        f"{base_failures['n_failed']} failed"
+    )
 
     rows = []
     for target in args.targets:
         base_stats = _match_stats(base_sgs, target, args.num_samples, symprecs)
         for w in weights:
             if w == 0.0:
-                stats, n_failed = base_stats, base_failed
+                stats, failures = base_stats, base_failures
             else:
                 seed = args.sample_seed + 1000 * int(target) + int(round(w * 10))
                 batch = gen(target_sg=target, w=w, seed=seed)
-                structs, n_failed = structures_from_sample_batch(batch)
+                structs, failures = _prepare_structures(
+                    batch, relaxer, args, label=f"SG{target}_w{w:g}"
+                )
                 sgs = {sp: compute_space_groups(structs, sp) for sp in symprecs}
                 stats = _match_stats(sgs, target, args.num_samples, symprecs)
             for sp in symprecs:
@@ -330,7 +493,9 @@ def main() -> int:
                     "guidance_scale": w,
                     "symprec": sp,
                     "n_samples": args.num_samples,
-                    "n_failed": n_failed,
+                    "n_failed": failures["n_failed"],
+                    "n_decode_failed": failures["n_decode_failed"],
+                    "n_relax_failed": failures["n_relax_failed"],
                     "n_valid": stats[sp]["n_valid"],
                     "n_match": stats[sp]["n_match"],
                     "match_rate": round(mr, 5),
@@ -358,6 +523,7 @@ def main() -> int:
         "symprecs": symprecs,
         "headline_symprec": args.headline_symprec,
         "num_samples": args.num_samples,
+        "relaxation": relaxation_meta,
         "rows": rows,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))

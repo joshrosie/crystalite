@@ -23,14 +23,14 @@ measurement is expensive or approximate:
 
 | Property | How to verify a generated structure | Cost |
 |---|---|---|
-| **Space group** | one deterministic `pymatgen` symmetry call | **free, exact** |
+| **Space group** | NequIP relax, then one deterministic `pymatgen` symmetry call | moderate |
 | Formation energy | ML-potential (CHGNet) relax + energy | slow, approximate |
 | Band gap | DFT or a separate ML predictor | expensive, noisy |
 
 Space group is a **geometric property fully determined by the coordinates we
-generate**, so it gives the tightest possible "did conditioning work?" loop: no
-DFT, no surrogate model, no relaxation. That makes it the ideal first target for
-demonstrating a conditioning mechanism.
+generate**, so it gives a direct "did conditioning work?" loop after standard
+MLIP relaxation: no DFT labels and no learned property predictor are needed.
+That makes it the ideal first target for demonstrating a conditioning mechanism.
 
 ## How it works
 
@@ -86,9 +86,11 @@ There are two families in the literature, and we are firmly in the first:
 ## How we evaluate
 
 For each target space group and guidance weight `w`, we generate `N` crystals and
-compute each one's space group with `pymatgen`'s `SpacegroupAnalyzer`
+relax each generated structure with NequIP batch relaxation, compute each
+relaxed structure's space group with `pymatgen`'s `SpacegroupAnalyzer`
 (`src/eval/spacegroup_match.py`), then report the **exact match-rate** to the
-target. The evaluation protocol follows the literature so the number is directly
+target. Structures that fail decoding, relaxation, or symmetry analysis count as
+misses. The evaluation protocol follows the literature so the number is directly
 comparable:
 
 - **Targets**: the 10 most common MP-20 space groups (`2, 12, 14, 62, 63, 139,
@@ -98,6 +100,7 @@ comparable:
   generated structures have sub-Ångström noise and symmetry detection is
   tolerance-sensitive.
 - **Guidance grid**: `w ∈ {0, 1, 2, 4, 8}`; `w=2` matches MatterGen's `γ=2`.
+- **Relaxation**: NequIP, batch mode, 200 relaxation steps, Frechet cell filter.
 - **Headline metrics**: (a) the **match-rate-vs-`w` curve** (the CFG story), and
   (b) **lift over the unconditional base rate** — match-rate divided by how often
   *unconditioned* generation lands in that space group. Lift controls for the fact
@@ -122,10 +125,14 @@ sbatch --export=ALL,CHECKPOINT=outputs/sg_cond/checkpoints/best.pt,OUT_DIR=resul
 ```
 
 On Snellius the scripts default to running code from `$HOME/crystalite` while
-reading shared assets from `$HOME/crysfinity`: `DATA_ROOT=$HOME/crysfinity/data/mp20`
-and `BASE_CKPT=$HOME/crysfinity/dng_clean.pt`. Override `PROJECT_ROOT`,
-`CRYSFINITY_ROOT`, `DATA_ROOT`, or `BASE_CKPT` in `--export` if the server layout
-changes.
+reading shared data from `$HOME/crysfinity`: `DATA_ROOT=$HOME/crysfinity/data/mp20`.
+The finetune job uses `$HOME/crysfinity/dng_clean.pt` when present, otherwise it
+falls back through `$HOME/crysfinity/dng.pt`, `$HOME/crystalite/dng_clean.pt`, and
+`$HOME/crystalite/dng.pt`. Override `PROJECT_ROOT`, `CRYSFINITY_ROOT`,
+`DATA_ROOT`, or `BASE_CKPT` in `--export` if the server layout changes. The sweep
+defaults to `RELAX_MLIP=nequip`, `NEQUIP_RELAX_MODE=batch`, and searches
+`$HOME/crystalite/mlips` before `$HOME/crysfinity/mlips` for compiled NequIP
+artifacts.
 
 The sweep writes `sweep.csv`, `summary.json`, and `match_rate_vs_w.png` to
 `OUT_DIR`. The headline result is match-rate at `symprec 0.1`, `w=2` — the number
