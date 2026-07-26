@@ -11,10 +11,11 @@
 # Space-group guidance sweep — the CFG "did conditioning work?" payoff loop.
 #
 # For a conditional (space-group LoRA) checkpoint, generates NUM_SAMPLES crystals
-# per (target space group x guidance weight w), relaxes them with NequIP batch
-# relaxation by default, and measures the exact space-group match-rate vs the
-# target (pymatgen SpacegroupAnalyzer), plus lift over the shared unconditional
-# base pool. Writes sweep.csv / summary.json / a
+# per (target space group x guidance weight w), filters raw samples to unique +
+# novel, relaxes those with NequIP batch relaxation, filters to the metastable
+# MSUN subset, and measures the exact space-group match-rate vs the target
+# (pymatgen SpacegroupAnalyzer), plus lift over the shared unconditional base
+# pool. Writes sweep.csv / summary.json / a
 # match_rate_vs_w.png to OUT_DIR.
 #
 # Protocol defaults follow the literature so the number is comparable:
@@ -64,13 +65,29 @@ NEQUIP_FMAX="${NEQUIP_FMAX:-0.005}"
 NEQUIP_MAX_FORCE_ABORT="${NEQUIP_MAX_FORCE_ABORT:-1000000}"
 NEQUIP_COMPILE_PATH="${NEQUIP_COMPILE_PATH:-}"
 if [[ -z "$NEQUIP_COMPILE_PATH" ]]; then
-  if [[ -d "$PROJECT_ROOT/mlips" ]]; then
+  if compgen -G "$PROJECT_ROOT/mlips/*.nequip.pt2" > /dev/null; then
     NEQUIP_COMPILE_PATH="$PROJECT_ROOT/mlips"
-  elif [[ -d "$CRYSFINITY_ROOT/mlips" ]]; then
+  elif compgen -G "$CRYSFINITY_ROOT/mlips/*.nequip.pt2" > /dev/null; then
     NEQUIP_COMPILE_PATH="$CRYSFINITY_ROOT/mlips"
   else
     NEQUIP_COMPILE_PATH="$PROJECT_ROOT/data/mlip/nequip"
   fi
+fi
+
+# ---- MSUN subset before SG analysis ----
+EVAL_SUBSET="${EVAL_SUBSET:-msun}"
+MSUN_REFERENCE_SPLITS="${MSUN_REFERENCE_SPLITS:-train}"
+MSUN_MINIMUM_NARY="${MSUN_MINIMUM_NARY:-1}"
+MSUN_MAXIMUM_NARY="${MSUN_MAXIMUM_NARY:-}"
+MSUN_MAX_E_ABOVE_HULL="${MSUN_MAX_E_ABOVE_HULL:-0.1}"
+THERMO_EHULL_METHOD="${THERMO_EHULL_METHOD:-mp2020_like}"
+THERMO_PPD_MP="${THERMO_PPD_MP:-$CRYSFINITY_ROOT/mp_02072023/2023-02-07-ppd-mp.pkl}"
+MATCHER_STOL="${MATCHER_STOL:-0.5}"
+MATCHER_LTOL="${MATCHER_LTOL:-0.3}"
+MATCHER_ANGLE_TOL="${MATCHER_ANGLE_TOL:-10}"
+MSUN_MAXIMUM_NARY_ARGS=()
+if [[ -n "$MSUN_MAXIMUM_NARY" ]]; then
+  MSUN_MAXIMUM_NARY_ARGS=(--msun_maximum_nary "$MSUN_MAXIMUM_NARY")
 fi
 
 # 10 most common MP-20 space groups; guidance grid brackets MatterGen gamma=2.
@@ -84,6 +101,7 @@ mkdir -p "$OUT_DIR"
 echo "[sg-sweep] checkpoint=$CHECKPOINT out_dir=$OUT_DIR"
 echo "[sg-sweep] project_root=$PROJECT_ROOT crysfinity_root=$CRYSFINITY_ROOT data_root=$DATA_ROOT"
 echo "[sg-sweep] relaxation=$RELAX_MLIP mode=$NEQUIP_RELAX_MODE steps=$RELAX_STEPS batch=$RELAX_BATCH_SIZE nequip=$NEQUIP_COMPILE_PATH"
+echo "[sg-sweep] eval_subset=$EVAL_SUBSET msun_refs=[$MSUN_REFERENCE_SPLITS] ppd=$THERMO_PPD_MP max_ehull=$MSUN_MAX_E_ABOVE_HULL"
 echo "[sg-sweep] targets=[$TARGETS] guidance=[$GUIDANCE_SCALES] n/cell=$NUM_SAMPLES"
 
 srun uv run python src/eval/sg_guidance_sweep.py \
@@ -108,6 +126,16 @@ srun uv run python src/eval/sg_guidance_sweep.py \
   --nequip_cell_filter "$NEQUIP_CELL_FILTER" \
   --nequip_fmax "$NEQUIP_FMAX" \
   --nequip_max_force_abort "$NEQUIP_MAX_FORCE_ABORT" \
+  --eval_subset "$EVAL_SUBSET" \
+  --msun_reference_splits $MSUN_REFERENCE_SPLITS \
+  --msun_minimum_nary "$MSUN_MINIMUM_NARY" \
+  "${MSUN_MAXIMUM_NARY_ARGS[@]}" \
+  --msun_max_e_above_hull "$MSUN_MAX_E_ABOVE_HULL" \
+  --thermo_ppd_mp "$THERMO_PPD_MP" \
+  --thermo_ehull_method "$THERMO_EHULL_METHOD" \
+  --matcher_stol "$MATCHER_STOL" \
+  --matcher_ltol "$MATCHER_LTOL" \
+  --matcher_angle_tol "$MATCHER_ANGLE_TOL" \
   --targets $TARGETS \
   --guidance_scales $GUIDANCE_SCALES \
   --symprecs $SYMPRECS \
