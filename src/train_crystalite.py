@@ -34,7 +34,9 @@ from src.data.mp20_tokens import (
 
 from src.eval.stability import _compute_thermo_metrics
 from src.eval.wasserstein import _compute_wasserstein_metrics
-from src.models.type_encoding import build_type_encoding
+from src.models.type_encoding_state import (
+    export_type_encoding, training_type_encoding, type_encoding_metadata,
+)
 from src.models.lattice_repr import (
     lattice_latent_to_y1,
     y1_to_lattice_latent,
@@ -196,7 +198,12 @@ def main() -> None:
         pin_memory=(device.type == "cuda"),
         drop_last=False,
     )
-    type_encoding = build_type_encoding(args.type_encoding, vz=VZ)
+    type_encoding = training_type_encoding(args.type_encoding, vz=VZ)
+
+    frozen_type_encoding_state = export_type_encoding(type_encoding)
+    args.type_encoding = type_encoding.name
+    args.type_encoding_metadata = type_encoding_metadata(type_encoding)
+    print(f"[encoding] {args.type_encoding_metadata}")
 
     model = CrystaliteModel(
         d_model=args.d_model,
@@ -291,6 +298,7 @@ def main() -> None:
             "step": step_value,
             "type_encoding": type_encoding.name,
             "type_dim": type_encoding.type_dim,
+            "type_encoding_state": frozen_type_encoding_state,
         }
         if ema is not None:
             ckpt["ema_state_dict"] = ema.state_dict()

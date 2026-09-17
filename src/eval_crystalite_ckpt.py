@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from src.data.mp20_tokens import MP20Tokens, VZ
-from src.models.type_encoding import build_type_encoding
+from src.models.type_encoding_state import resolve_type_encoding, type_encoding_metadata
 from src.crystalite import CrystaliteModel, mod1
 from src.crystalite.sampler import clamp_lattice_latent as _clamp_lattice_latent, edm_sampler
 from src.eval.dng_eval import (
@@ -343,6 +343,9 @@ def main() -> None:
         preference=args.checkpoint_preference,
     )
     ckpt = _load_checkpoint(ckpt_path)
+    type_encoding = resolve_type_encoding(ckpt, vz=VZ)
+    type_encoding_name = type_encoding.name
+    print(f"[encoding] {type_encoding_metadata(type_encoding)}")
     model, model_args = _build_model_from_ckpt(ckpt=ckpt, device=torch.device("cpu"))
 
     dataset_name = str(
@@ -410,8 +413,6 @@ def main() -> None:
     else:
         print("[ckpt] Using regular model weights for sampling.")
 
-    type_encoding_name = str(ckpt.get("type_encoding", model_args.get("type_encoding", "atomic_number")))
-    type_encoding = build_type_encoding(type_encoding_name, vz=VZ)
 
     train_split = "train" if (Path(data_root) / "raw" / "train.csv").exists() else "all"
     val_split = "val" if (Path(data_root) / "raw" / "val.csv").exists() else train_split
@@ -732,6 +733,7 @@ def main() -> None:
         "meta": {
             "run_name": run_name,
             "checkpoint_path": str(ckpt_path),
+            "type_encoding_state": type_encoding_metadata(type_encoding),
             "checkpoint_step": int(ckpt.get("step", -1)),
             "dataset_name": dataset_name,
             "data_root": data_root,

@@ -33,3 +33,15 @@ class EMA:
 
     def state_dict(self) -> dict[str, torch.Tensor]:
         return {k: v.detach().cpu().clone() for k, v in self.shadow.items()}
+
+    def load_state_dict(self, state: dict[str, torch.Tensor]) -> None:
+        """Restore saved CPU shadows into the model's current device buffers."""
+        if set(state) != set(self.shadow):
+            raise ValueError("EMA parameter keys do not match the model.")
+        for name, target in self.shadow.items():
+            source = state[name]
+            if source.shape != target.shape or source.dtype != target.dtype:
+                raise ValueError(f"EMA tensor shape/dtype mismatch for {name}.")
+        with torch.no_grad():
+            for name, target in self.shadow.items():
+                target.copy_(state[name])

@@ -543,6 +543,11 @@ def _parse_supported_subatomic_tokenizer_pca_dim(mode: str) -> int:
 
 
 def build_type_encoding(mode: str, vz: int) -> TypeEncoding:
+    """Construct a fresh training encoding.
+
+    Checkpoint consumers must use type_encoding_state.resolve_type_encoding so
+    inference and fine-tuning reuse the model's saved table instead of refitting PCA.
+    """
     mode_norm = mode.strip().lower()
     if mode_norm == "atomic_number":
         return AtomicNumberEncoding(vz=vz)

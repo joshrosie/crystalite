@@ -51,7 +51,7 @@ from src.eval_crystalite_ckpt import (
     _resolve_checkpoint_path,
     _seed_everything,
 )
-from src.models.type_encoding import build_type_encoding
+from src.models.type_encoding_state import resolve_type_encoding, type_encoding_metadata
 
 
 def parse_args() -> argparse.Namespace:
@@ -185,6 +185,9 @@ def main() -> None:
         preference=cli.checkpoint_preference,
     )
     ckpt = _load_checkpoint(ckpt_path)
+    type_encoding = resolve_type_encoding(ckpt, vz=VZ)
+    type_encoding_name = type_encoding.name
+    print(f"[encoding] {type_encoding_metadata(type_encoding)}")
     model_args = dict(ckpt.get("model_args", {}))
     if not bool(model_args.get("csp", False)):
         print("[warn] model_args.csp is not True; assuming a CSP checkpoint anyway.")
@@ -220,10 +223,6 @@ def main() -> None:
     )
     data_root = str(_cfg_value(cli.data_root, model_args, "data_root", "data/mp20"))
 
-    type_encoding_name = str(
-        ckpt.get("type_encoding", model_args.get("type_encoding", "atomic_number"))
-    )
-    type_encoding = build_type_encoding(type_encoding_name, vz=VZ)
 
     split = _resolve_split(data_root, cli.split)
     ds = MP20Tokens(root=data_root, augment_translate=False, split=split, nmax=nmax)
@@ -387,6 +386,7 @@ def main() -> None:
         csv_path=Path(cli.output_csv) if cli.output_csv else (out_dir / f"{dataset_name}_{split}_csp.csv"),
         overwrite=cli.overwrite,
         type_encoding_name=type_encoding_name,
+        encoding_metadata=type_encoding_metadata(type_encoding),
     )
 
 
@@ -399,6 +399,7 @@ def _write_outputs(
     csv_path: Path,
     overwrite: bool,
     type_encoding_name: str,
+    encoding_metadata: dict[str, Any] | None = None,
 ) -> None:
     base_cols = [
         "ckpt_path", "ckpt_step", "dataset_name", "split", "num_samples",
@@ -423,6 +424,7 @@ def _write_outputs(
         summary = {
             "task": f"{best['dataset_name']} CSP {best['split']}",
             "type_encoding": type_encoding_name,
+            "type_encoding_state": encoding_metadata,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "best": best,
             "grid_rows": rows,

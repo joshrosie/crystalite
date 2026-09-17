@@ -23,7 +23,7 @@ from pymatgen.core.periodic_table import Element
 from pymatgen.io.cif import CifWriter
 
 from src.data.mp20_tokens import MP20Tokens, VZ, tokens_to_structure
-from src.models.type_encoding import build_type_encoding
+from src.models.type_encoding_state import resolve_type_encoding, type_encoding_metadata
 from src.crystalite import CrystaliteModel, mod1
 from src.crystalite.sampler import clamp_lattice_latent as _clamp_lattice_latent, edm_sampler
 from src.models.lattice_repr import lattice_latent_to_y1
@@ -260,7 +260,7 @@ def parse_args() -> argparse.Namespace:
         description="Load a Crystalite checkpoint and sample structures offline."
     )
     parser.add_argument("--train_output_dir", type=str, default="")
-    parser.add_argument("--checkpoint", type=str, default="")
+    parser.add_argument("--checkpoint", type=str, default="", help="Uses saved encoding or verified legacy M0; unknown legacy PCA requires migration (docs/type_encoding.md).")
     parser.add_argument(
         "--checkpoint_preference",
         type=str,
@@ -336,6 +336,9 @@ def main() -> None:
         preference=args.checkpoint_preference,
     )
     ckpt = _load_checkpoint(ckpt_path)
+    type_encoding = resolve_type_encoding(ckpt, vz=VZ)
+    type_encoding_name = type_encoding.name
+    print(f"[encoding] {type_encoding_metadata(type_encoding)}")
     model, model_args = _build_model_from_ckpt(ckpt=ckpt, device=torch.device("cpu"))
 
     nmax = int(_cfg_value(args.nmax, model_args, "nmax", 20))
@@ -375,8 +378,6 @@ def main() -> None:
     else:
         print("[ckpt] Using regular model weights for sampling.")
 
-    type_encoding_name = str(ckpt.get("type_encoding", model_args.get("type_encoding", "atomic_number")))
-    type_encoding = build_type_encoding(type_encoding_name, vz=VZ)
 
     allowed_mask = _parse_allowed_elements(args.allowed_elements, VZ)
     ckpt_atom_count_strategy = str(model_args.get("atom_count_strategy", "empirical")).lower()
@@ -573,6 +574,7 @@ def main() -> None:
             "dataset_name": dataset_name,
             "data_root": data_root,
             "type_encoding": type_encoding.name,
+            "type_encoding_state": type_encoding_metadata(type_encoding),
             "lattice_repr": lattice_repr,
         },
         "sampling": {

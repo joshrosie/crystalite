@@ -1,0 +1,7 @@
+{
+  "12052869a9ae1c047132d2373d4f97101a7f6bcb3dfb6035b8a9cdaaf5f9a136": {
+    "asset": "m0_pca16_v1.pt",
+    "state_sha256": "b2008b4a7a4c7d2aa760b8813f742cb0c406d0293e5b26244fde901564e1ea06",
+    "checkpoint_step": 1325000
+  }
+}

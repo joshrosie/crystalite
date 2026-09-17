@@ -17,3 +17,6 @@ baselines/
 *.pt
 *.zip
 /best_csp_checkpoint_package_2026-06-24/
+
+# Small verified atom-encoding tables ship with source checkouts.
+!src/models/encoding_assets/*.pt

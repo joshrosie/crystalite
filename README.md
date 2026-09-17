@@ -21,6 +21,7 @@ Both workflows use the same main training entrypoint, `src/train_crystalite.py`,
 - [Environment Setup](#environment-setup)
 - [Data and Representation](#data-and-representation)
   - [Atom representations](#atom-representations)
+- [Checkpoint-owned atom encodings](#checkpoint-owned-atom-encodings)
 - [Pretrained DNG Checkpoint](#pretrained-dng-checkpoint)
   - [Sampling from the pretrained checkpoint](#sampling-from-the-pretrained-checkpoint)
   - [Full DNG evaluation with NequIP relaxation](#full-dng-evaluation-with-nequip-relaxation)
@@ -115,6 +116,19 @@ For the atom-type channel, the current training code supports multiple element r
 - `subatomic_tokenizer_pca_8`, `subatomic_tokenizer_pca_16`, `subatomic_tokenizer_pca_24`: explicit PCA dimensionality presets
 
 These representations affect how atom types are encoded and decoded inside the EDM model. In DNG mode they shape the sampled atom-type path; in CSP mode atom types are fixed, but the chosen representation still determines the internal type features seen by the model.
+
+## Checkpoint-owned atom encodings
+
+Fresh training saves its own exact atom encoding in every checkpoint. Sampling,
+evaluation, and Crysfinity fine-tuning restore that state without refitting PCA.
+The verified legacy M0 checkpoint automatically uses the small recovered table
+bundled with both repos, selected by matching model and EMA weights. Other old PCA
+checkpoints require a verified recovery artifact; they never silently rebuild PCA.
+The released atomic-number CSP checkpoints require no PCA recovery.
+
+See [encoding format, legacy migration, and reproducibility](docs/type_encoding.md)
+for commands and provenance. A checkpoint with embedded state is self-contained;
+matching seeds across different GPUs can still produce different samples.
 
 ## Pretrained DNG Checkpoint
 
