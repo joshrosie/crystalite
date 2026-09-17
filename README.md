@@ -2,13 +2,31 @@
   <img src="media/Crystalite logo-03.png" alt="Crystalite" width="400" />
 </p>
 
+<h2 align="center">Crystalite: A Lightweight Transformer for Efficient Crystal Modeling</h2>
+
+<p align="center">
+  Tin Hadži Veljković &middot; Joshua Rosenthal &middot; Ivor Lončarić &middot; Jan-Willem van de Meent
+</p>
+
+<p align="center">
+  Official implementation for crystal structure prediction and de novo generation.
+</p>
+
 <p align="center">
   <a href="https://arxiv.org/abs/2604.02270">
-    <img src="https://img.shields.io/badge/arXiv-2604.02270-b31b1b.svg" alt="arXiv:2604.02270" />
+    <img src="https://img.shields.io/badge/arXiv-Read_the_paper-B31B1B?style=flat-square&amp;logo=arxiv&amp;logoColor=white" alt="Read the Crystalite paper on arXiv (2604.02270)" />
   </a>
 </p>
 
+<p align="center">
+  <a href="https://arxiv.org/pdf/2604.02270">Paper PDF</a> &nbsp;&middot;&nbsp;
+  <a href="#citation">Citation</a> &nbsp;&middot;&nbsp;
+  <a href="#pretrained-dng-checkpoint">Pretrained models</a> &nbsp;&middot;&nbsp;
+  <a href="#environment-setup">Getting started</a>
+</p>
+
 ---
+
 >[!WARNING]
 >This is an early release of the `crystalite` codebase. It has undergone a major refactor so everything might not be working 100% just yet. We will be updating this repo regularly so please feel free to reach out if you encounter any issues.
 
@@ -47,6 +65,7 @@ Both workflows use the same main training entrypoint, `src/train_crystalite.py`,
   - [Phase diagram (hull)](#phase-diagram-hull)
   - [NequIP OAM-L setup](#nequip-oam-l-setup)
 - [Outputs and Artifacts](#outputs-and-artifacts)
+- [Citation](#citation)
 
 ## Project Overview
 
@@ -643,7 +662,10 @@ Optional checkpoint-eval artifacts include:
 If W&B logging is enabled during training, metrics and rendered sample images are also logged there.
 
 ## Citation
-```
+
+If you use Crystalite in your research, please cite:
+
+```bibtex
 @misc{veljković2026crystalitelightweighttransformerefficient,
       title={Crystalite: A Lightweight Transformer for Efficient Crystal Modeling}, 
       author={Tin Hadži Veljković and Joshua Rosenthal and Ivor Lončarić and Jan-Willem van de Meent},
