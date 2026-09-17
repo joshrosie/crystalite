@@ -2,6 +2,8 @@
   <img src="media/Crystalite logo-03.png" alt="Crystalite" width="400" />
 </p>
 
+**Paper:** [Crystalite: A Lightweight Transformer for Efficient Crystal Modeling](https://arxiv.org/abs/2604.02270) (arXiv:2604.02270).
+
 ---
 >[!WARNING]
 >This is an early release of the `crystalite` codebase. It has undergone a major refactor so everything might not be working 100% just yet. We will be updating this repo regularly so please feel free to reach out if you encounter any issues.
