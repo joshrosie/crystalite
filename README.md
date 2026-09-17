@@ -2,7 +2,11 @@
   <img src="media/Crystalite logo-03.png" alt="Crystalite" width="400" />
 </p>
 
-**Paper:** [Crystalite: A Lightweight Transformer for Efficient Crystal Modeling](https://arxiv.org/abs/2604.02270) (arXiv:2604.02270).
+<p align="center">
+  <a href="https://arxiv.org/abs/2604.02270">
+    <img src="https://img.shields.io/badge/arXiv-2604.02270-b31b1b.svg" alt="arXiv:2604.02270" />
+  </a>
+</p>
 
 ---
 >[!WARNING]
