@@ -336,8 +336,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="data/mlip/nequip/*.nequip.pt2",
         help=(
-            "Path, directory, or glob for compiled NequIP AOT artifacts "
-            "(`.nequip.pt2`). Used when --thermo_mlip nequip."
+            "Explicit NequIP model file (`.nequip.pt2` AOTInductor or "
+            "`.nequip.pth` TorchScript), or directory/glob for `.nequip.pt2` "
+            "artifacts only. Used when --thermo_mlip nequip."
         ),
     )
     parser.add_argument(

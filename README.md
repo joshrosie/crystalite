@@ -358,6 +358,65 @@ python src/train_crystalite.py \
 
 These flags intentionally override the generic CLI defaults. In particular, use the explicit `subatomic_tokenizer_pca_16` preset for PCA-16 training; the shorthand `subatomic_tokenizer_pca` resolves to PCA-24.
 
+#### Reproducing the released DNG checkpoint
+
+This reproduces the training and NequIP SUN/MSUN evaluation settings of the released DNG checkpoint (W&B `ai_ecg/DNG_MP20/kny9rodv`, atom-reps `00e3f08`), using the current PCA-16 preset and sampling flags.
+
+```bash
+python src/train_crystalite.py \
+  --data_root data/mp20 \
+  --dataset_name mp20 \
+  --output_dir outputs/dng_mp20_pca16 \
+  --nmax 20 \
+  --batch_size 128 \
+  --bf16 \
+  --max_steps 2500000 \
+  --type_encoding subatomic_tokenizer_pca_16 \
+  --d_model 512 \
+  --n_heads 16 \
+  --n_layers 14 \
+  --use_edge_bias \
+  --edge_bias_n_freqs 12 \
+  --edge_bias_hidden_dim 256 \
+  --edge_bias_n_rbf 32 \
+  --lattice_embed_mode mlp \
+  --lattice_repr ltri \
+  --loss_weights 1 50 5 \
+  --coord_loss_mode frac_mse \
+  --sigma_data_type 0.3 \
+  --sigma_data_coord 0.3 \
+  --sigma_data_lattice 0.3 \
+  --val_every 5000 \
+  --sample_frequency 25000 \
+  --sample_count 10000 \
+  --sample_num_steps 150 \
+  --sample_chunk_size 2048 \
+  --sample_vis_count 5 \
+  --rho 7 \
+  --S_churn 60 \
+  --S_noise 1.003 \
+  --aa_rho_coords 10 \
+  --aa_rho_lattice 10 \
+  --thermo_stability_check \
+  --thermo_mlip nequip \
+  --nequip_compile_path data/mlip/nequip/NequIP-OAM-L.nequip.pth \
+  --nequip_relax_mode batch \
+  --nequip_cell_filter frechet \
+  --nequip_fmax 0.005 \
+  --thermo_stability_batch 128 \
+  --thermo_relax_steps 200 \
+  --thermo_ehull_method mp2020_like \
+  --thermo_ppd_mp data/mp20/hull/2023-02-07-ppd-mp.pkl \
+  --no_thermo_before_steps 100 \
+  --sun_k 2048 \
+  --ckpt_every 10000 \
+  --ckpt_latest_only \
+  --best_ckpt
+```
+
+The original run took about 103 hours on one RTX 6000 Ada, including evaluation; the trainer has no resume support, so use a job limit of several days.
+Keep W&B logging enabled (omit `--no_wandb`), because train-time thermo metrics are computed only when logging is enabled.
+
 ### CSP training
 
 Canonical CSP run:
@@ -445,6 +504,8 @@ These metrics are driven by the train-time sampling settings such as:
 - `--sample_num_steps`
 
 Sampler and sampling-metric flags are separate from the gradient-training loss. `--sample_frequency 0` disables train-time sampling; when sampling is disabled, the remaining flags in this block are recorded in config but not executed during training. Set `--sample_frequency` to a positive step interval to run the sampler and metrics during training.
+
+The block below disables sampling; use [Reproducing the released DNG checkpoint](#reproducing-the-released-dng-checkpoint) for the full training command with periodic NequIP evaluation.
 
 ```bash
 --sample_frequency 0
@@ -582,11 +643,11 @@ mp_02072023/
 └── 2023-02-07-ppd-mp.pkl
 ```
 
-Pass the path with `--ppd_path mp_02072023/2023-02-07-ppd-mp.pkl`, or set `thermo_cfg.ppd_path` when constructing `StabilityLogger` programmatically.
+Pass the path with `--thermo_ppd_mp mp_02072023/2023-02-07-ppd-mp.pkl`, or set `thermo_cfg.ppd_path` when constructing `StabilityLogger` programmatically.
 
 ### NequIP OAM-L setup
 
-The recommended NequIP model is [NequIP-OAM-L v0.1](https://www.nequip.net/models/mir-group/NequIP-OAM-L:0.1). It must be compiled to a `.nequip.pt2` file before use.
+The recommended NequIP model is [NequIP-OAM-L v0.1](https://www.nequip.net/models/mir-group/NequIP-OAM-L:0.1). Compile it to an AOTInductor `.nequip.pt2` or TorchScript `.nequip.pth` file before use.
 
 Compile runtime targets for GPU depending on whether you will do sequential or batch relaxation:
 
@@ -614,6 +675,16 @@ Point `--nequip_compile_path` at either a single `.nequip.pt2` file, a directory
 - `batch` -> picks the `--target batch` artifact
 
 The default shared glob is `data/mlip/nequip/*.nequip.pt2`.
+
+Alternatively, compile a TorchScript model:
+
+```bash
+nequip-compile --mode torchscript --device cuda --target ase \
+  nequip.net:mir-group/NequIP-OAM-L:0.1 \
+  data/mlip/nequip/NequIP-OAM-L.nequip.pth
+```
+
+This TorchScript model serves both `--nequip_relax_mode sequential` and `--nequip_relax_mode batch`, even though it is compiled with `--target ase`. Pass it as an explicit file path with `--nequip_compile_path data/mlip/nequip/NequIP-OAM-L.nequip.pth`; directories and globs resolve `.nequip.pt2` only. TorchScript is the working option on GPUs where AOTInductor packages fail (RTX 6000 Ada in our tests).
 
 Optional NequIP-based DNG checkpoint eval:
 

@@ -339,9 +339,10 @@ def _resolve_explicit_nequip_file(compile_path: str | Path) -> Path | None:
     path = Path(compile_path)
     for candidate in _iter_nequip_search_paths(path):
         if candidate.is_file():
-            if not str(candidate).endswith(".nequip.pt2"):
+            if not str(candidate).endswith((".nequip.pt2", ".nequip.pth")):
                 raise ValueError(
-                    "NequIP thermo/runtime expects AOTInductor `.nequip.pt2` artifacts. "
+                    "NequIP thermo/runtime expects AOTInductor `.nequip.pt2` or "
+                    "TorchScript `.nequip.pth` artifacts. "
                     f"Got direct file path: {candidate!s}"
                 )
             return candidate.resolve()
@@ -433,7 +434,8 @@ def resolve_nequip_compiled_model(
 
     explicit_file = _resolve_explicit_nequip_file(compile_path)
     if explicit_file is not None:
-        if expected_target is None:
+        # TorchScript models support both ASE and batch without AOT target metadata.
+        if str(explicit_file).endswith(".nequip.pth") or expected_target is None:
             return str(explicit_file)
         info = _inspect_nequip_compiled_model(explicit_file)
         if info["target"] != expected_target:
