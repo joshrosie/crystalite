@@ -348,7 +348,7 @@ python src/train_crystalite.py \
   --edge_bias_n_rbf 32 \
   --lattice_embed_mode mlp \
   --lattice_repr ltri \
-  --loss_weights 16 150 5 \
+  --loss_weights 1 50 5 \
   --coord_loss_mode frac_mse \
   --sigma_data_type 0.3 \
   --sigma_data_coord 0.3 \

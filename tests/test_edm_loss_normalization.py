@@ -20,7 +20,7 @@ def _zero_clean_and_noisy(
     return denoised, clean, frac_noisy
 
 
-def test_type_loss_is_scalar_mean_over_channels():
+def test_type_loss_sums_channels_per_atom():
     denoised, clean, frac_noisy = _zero_clean_and_noisy(batch=1, nmax=3, type_dims=5)
     pad_mask = torch.tensor([[False, False, True]])
     sigma = torch.tensor([1.0], dtype=torch.float32)
@@ -39,12 +39,14 @@ def test_type_loss_is_scalar_mean_over_channels():
         loss_weights={"A": 1.0, "F": 1.0, "Y": 1.0},
     )
 
-    torch.testing.assert_close(losses["loss_a"], torch.tensor(2.0))
+    # Paper Eq. 7: squared error summed over the 5 channels (EDM weight 2 each),
+    # averaged over the 2 real atoms.
+    torch.testing.assert_close(losses["loss_a"], torch.tensor(10.0))
     torch.testing.assert_close(losses["loss_f"], torch.tensor(0.0))
     torch.testing.assert_close(losses["loss_y"], torch.tensor(0.0))
 
 
-def test_frac_coord_loss_is_scalar_mean_over_xyz():
+def test_frac_coord_loss_sums_xyz_per_atom():
     denoised, clean, frac_noisy = _zero_clean_and_noisy(batch=1, nmax=3, type_dims=4)
     pad_mask = torch.tensor([[False, True, False]])
     sigma = torch.tensor([1.0], dtype=torch.float32)
@@ -65,6 +67,8 @@ def test_frac_coord_loss_is_scalar_mean_over_xyz():
         coord_loss_mode="frac_mse",
     )
 
-    torch.testing.assert_close(losses["loss_f"], torch.tensor(0.125))
+    # Paper Eq. 7: squared error summed over x, y, z (2 * 0.25**2 each),
+    # averaged over the 2 real atoms.
+    torch.testing.assert_close(losses["loss_f"], torch.tensor(0.375))
     torch.testing.assert_close(losses["loss_a"], torch.tensor(0.0))
     torch.testing.assert_close(losses["loss_y"], torch.tensor(0.0))
