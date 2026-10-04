@@ -416,6 +416,7 @@ python src/train_crystalite.py \
 
 The original run took about 103 hours on one RTX 6000 Ada, including evaluation; the trainer has no resume support, so use a job limit of several days.
 Keep W&B logging enabled (omit `--no_wandb`), because train-time thermo metrics are computed only when logging is enabled.
+Batched thermo evaluation isolates relaxation errors and counts affected structures as failures so training can continue.
 
 ### CSP training
 

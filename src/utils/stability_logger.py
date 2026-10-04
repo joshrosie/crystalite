@@ -243,11 +243,6 @@ class StabilityLogger:
         return f"exception:{type(exc).__name__}", False
 
     @staticmethod
-    def _is_structure_level_batch_exception(exc: Exception) -> bool:
-        message = str(exc).strip().lower()
-        return ("force divergence" in message) or ("non-finite" in message)
-
-    @staticmethod
     def _extract_batched_failure_indices(exc: Exception, batch_size: int) -> list[int]:
         message = str(exc)
         match = re.search(r"systems\s+(\[[^\]]*\])", message)
@@ -441,11 +436,7 @@ class StabilityLogger:
                         "Batched NequIP returned a mismatched number of relaxations: "
                         f"{len(relaxations)} for batch of {len(structures)}"
                     )
-                for relaxation in relaxations:
-                    record_relaxation(relaxation)
             except Exception as exc:
-                if not self._is_structure_level_batch_exception(exc):
-                    raise
                 reason, is_divergence = self._thermo_exception_reason(exc)
                 offender_indices = self._extract_batched_failure_indices(
                     exc,
@@ -472,6 +463,14 @@ class StabilityLogger:
                 midpoint = len(structures) // 2
                 relax_batched(structures[:midpoint])
                 relax_batched(structures[midpoint:])
+            else:
+                # A result-processing failure must not retry already counted structures.
+                for relaxation in relaxations:
+                    try:
+                        record_relaxation(relaxation)
+                    except Exception as exc:
+                        reason, is_divergence = self._thermo_exception_reason(exc)
+                        record_failure(reason, is_divergence=is_divergence)
 
         if (
             self._thermo_backend == "nequip"
